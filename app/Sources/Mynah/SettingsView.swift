@@ -28,6 +28,9 @@ struct SettingsView: View {
 private struct GeneralTab: View {
     @ObservedObject var settings: SettingsStore
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var microphones = AudioDevices.inputs()
+
+    private var selectedMicConnected: Bool { microphones.contains { $0.uid == settings.data.inputDevice } }
 
     var body: some View {
         Form {
@@ -44,6 +47,22 @@ private struct GeneralTab: View {
                     Text("Tip: set System Settings › Keyboard › “Press 🌐 key to” → “Do Nothing” so the emoji picker doesn’t pop up.")
                         .font(.callout).foregroundStyle(.secondary)
                 }
+            }
+            Section {
+                Picker("Microphone", selection: $settings.data.inputDevice) {
+                    if settings.data.inputDevice.isEmpty { Text("System default").tag("") }
+                    ForEach(microphones) { Text($0.name).tag($0.uid) }
+                    if !settings.data.inputDevice.isEmpty, !selectedMicConnected {
+                        Text("Disconnected device").tag(settings.data.inputDevice)
+                    }
+                }
+                .onAppear { microphones = AudioDevices.inputs() }
+                if !settings.data.inputDevice.isEmpty, !selectedMicConnected {
+                    Text("That microphone isn’t connected — using the built-in mic until it’s back.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                Text("Using a Bluetooth headset’s mic drops its audio to call quality while you dictate.")
+                    .font(.callout).foregroundStyle(.secondary)
             }
             Section {
                 Toggle("AI cleanup (remove filler, fix punctuation, apply corrections)", isOn: $settings.data.cleanupEnabled)

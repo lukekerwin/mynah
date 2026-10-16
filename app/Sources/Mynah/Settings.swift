@@ -50,6 +50,9 @@ final class SettingsStore: ObservableObject {
         var hotkey: HotkeyChoice = .fn
         var playSounds = true
         var restoreClipboard = true
+        /// Core Audio UID of the microphone. Starts as the built-in mic and only changes when
+        /// the user picks another; empty only on Macs without one (uses the system default).
+        var inputDevice = AudioDevices.builtInUID ?? ""
         var onboarded = false
 
         /// Gemma 4 E4B (~5 GB) + Parakeet (~3.7 GB) is comfortable on 16 GB+ Macs.
@@ -74,6 +77,7 @@ final class SettingsStore: ObservableObject {
             hotkey = (try? c.decodeIfPresent(HotkeyChoice.self, forKey: .hotkey)) ?? d.hotkey
             playSounds = try c.decodeIfPresent(Bool.self, forKey: .playSounds) ?? d.playSounds
             restoreClipboard = try c.decodeIfPresent(Bool.self, forKey: .restoreClipboard) ?? d.restoreClipboard
+            inputDevice = try c.decodeIfPresent(String.self, forKey: .inputDevice) ?? d.inputDevice
             onboarded = try c.decodeIfPresent(Bool.self, forKey: .onboarded) ?? d.onboarded
         }
     }
