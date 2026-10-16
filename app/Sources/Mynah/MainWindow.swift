@@ -130,7 +130,7 @@ struct MainWindow: View {
         case .dictionary: DictionaryPage(settings: settings)
         case .snippets: SnippetsPage(settings: settings)
         case .settings: SettingsPage(controller: controller, settings: settings, engine: engine)
-        case .about: AboutPage()
+        case .about: AboutPage(updater: controller.updater)
         }
     }
 }
@@ -814,6 +814,8 @@ private struct SettingsPage: View {
             }
             .task(id: engine.status) { await refreshModels() }
 
+            UpdatesCard(updater: controller.updater)
+
             Card(title: "Permissions") {
                 VStack(spacing: 0) {
                     permissionRow("Microphone", granted: controller.microphoneOK, detail: "To hear you.", pane: "Privacy_Microphone")
@@ -874,13 +876,38 @@ private struct SettingsPage: View {
     }
 }
 
+private struct UpdatesCard: View {
+    @ObservedObject var updater: Updater
+
+    var body: some View {
+        Card(title: "Updates") {
+            VStack(spacing: 0) {
+                SettingRow(title: "Version \(Updater.currentVersion)") {
+                    Button("Check now") { updater.checkForUpdates() }.buttonStyle(.quiet).disabled(!updater.canCheck)
+                }
+                RowDivider()
+                SettingRow(title: "Check automatically", detail: "Once a day. Mynah asks before installing.") {
+                    Toggle("", isOn: $updater.automaticallyChecks).labelsHidden().toggleStyle(TealToggleStyle())
+                }
+                RowDivider()
+                SettingRow(title: "Install automatically", detail: "Download updates in the background and install them when Mynah quits.") {
+                    Toggle("", isOn: $updater.automaticallyInstalls).labelsHidden().toggleStyle(TealToggleStyle())
+                }
+                RowDivider()
+                SettingRow(title: "Beta versions", detail: "Get pre-releases with new features before they're stable.") {
+                    Toggle("", isOn: $updater.includeBetas).labelsHidden().toggleStyle(TealToggleStyle())
+                }
+            }
+        }
+        .disabled(!Updater.available)
+    }
+}
+
 // MARK: - About
 
 private struct AboutPage: View {
-    private var version: String {
-        let info = Bundle.main.infoDictionary ?? [:]
-        return "\(info["CFBundleShortVersionString"] as? String ?? "dev") (\(info["CFBundleVersion"] as? String ?? "0"))"
-    }
+    @ObservedObject var updater: Updater
+    private var version: String { Updater.currentVersion }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -897,7 +924,7 @@ private struct AboutPage: View {
                             .font(Theme.caption).foregroundStyle(Theme.inkTertiary)
                         HStack(spacing: 10) {
                             Button("GitHub") { NSWorkspace.shared.open(AppController.repoURL) }.buttonStyle(.quiet)
-                            Button("Check for updates") { NSWorkspace.shared.open(AppController.repoURL.appendingPathComponent("releases")) }.buttonStyle(.quiet)
+                            Button("Check for updates") { updater.checkForUpdates() }.buttonStyle(.quiet).disabled(!updater.canCheck)
                             Button("Report an issue") { NSWorkspace.shared.open(AppController.repoURL.appendingPathComponent("issues")) }.buttonStyle(.quiet)
                         }
                         .padding(.top, 4)

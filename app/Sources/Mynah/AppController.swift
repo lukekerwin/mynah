@@ -40,6 +40,7 @@ final class AppController: ObservableObject {
         MeetingController(store: $0, settings: settings, engine: engine)
     }
     let mainWindow = MainWindowController()
+    let updater = Updater()
     private(set) var statusBar: StatusBarController?
 
     static let repoURL = URL(string: "https://github.com/lukekerwin/mynah")!
@@ -102,6 +103,8 @@ final class AppController: ObservableObject {
             Task { @MainActor in self?.refreshPermissions() }
         }
         startEngine()
+        updater.isBusy = { [weak self] in self?.meetings?.isRecording == true }
+        updater.start()
         meetings?.onShowMeetings = { [weak self] id in self?.showMain(.meetings, meeting: id.map { MeetingFocus(meetingID: $0) }) }
         meetings?.launch(isDictating: { [weak self] in self?.phase != .idle })
         if !settings.data.onboarded {

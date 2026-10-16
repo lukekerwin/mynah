@@ -51,6 +51,10 @@ Named after the mynah bird, famous for repeating human speech.
    - wait for the one-time download of the engine and models (~9 GB),
    - set System Settings › Keyboard › "Press 🌐 key to" → **Do Nothing**, so <kbd>Fn</kbd> doesn't open the emoji picker.
 
+**Updates** install from inside the app (Settings › Updates, or Mynah › Check for Updates…), so you
+only download the DMG once. Because builds are ad-hoc signed, macOS asks for Microphone and
+Accessibility again after an update.
+
 **Requirements:** Apple Silicon (M1 or later) · macOS 14 Sonoma or later · 16 GB RAM recommended
 (8 GB Macs automatically get a smaller cleanup model) · ~12 GB free disk.
 
@@ -127,7 +131,10 @@ For engine work, run it directly and point a dev build of the app at it:
 MYNAH_ENGINE_DIR=$PWD/engine MYNAH_UV=$(which uv) app/.build/debug/Mynah
 ```
 
-Releases are built by GitHub Actions: bump `VERSION`, then push a matching tag (`v0.2.0`).
+Releases are built by GitHub Actions: bump `VERSION`, then push a matching tag (`v0.2.0`). The
+workflow signs the DMG with the Sparkle EdDSA key (repo secret `SPARKLE_ED_PRIVATE_KEY`; the public
+key is in `scripts/build_app.sh`) and adds it to `appcast.xml` on the `appcast` branch, which the app
+checks daily. Tags with a suffix (`v0.2.0-beta.1`) go to the beta channel.
 
 ## Benchmarking with your own voice
 

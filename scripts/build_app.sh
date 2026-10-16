@@ -16,7 +16,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="Mynah"
 BUNDLE_ID="com.lukekerwin.mynah"
 VERSION="$(cat "$ROOT/VERSION")"
-BUILD_NUMBER="${MYNAH_BUILD_NUMBER:-$(date +%Y%m%d%H%M)}"
+# Sparkle (in-app updates) reads this appcast and checks downloads against this
+# EdDSA public key. The private key is the SPARKLE_ED_PRIVATE_KEY repo secret.
+FEED_URL="https://raw.githubusercontent.com/lukekerwin/mynah/appcast/appcast.xml"
+SPARKLE_PUBLIC_KEY="t/RvlKmBnJ0FdnNVKcg0prkEH2BZg/T7j2uwitMGBho="
 # Pinned uv, bundled into the app (it builds the engine's Python environment).
 UV_VERSION="0.13.1"
 UV_SHA256="cfe454573412ff7380d15fc7dae5997ab53ffce72fce0a78e91ddbc84001acd2"
@@ -34,15 +37,18 @@ fi
 echo "==> Checking engine lockfile"
 (cd "$ROOT/engine" && "$UV_BIN" lock --check --quiet)
 
-echo "==> Building Swift app $VERSION ($BUILD_NUMBER)"
+echo "==> Building Swift app $VERSION"
 (cd "$ROOT/app" && swift build -c release --arch arm64 --quiet)
 BIN="$(cd "$ROOT/app" && swift build -c release --arch arm64 --show-bin-path)/$APP_NAME"
 
 OUT="$ROOT/build/$APP_NAME.app"
 RES="$OUT/Contents/Resources"
 rm -rf "$OUT"
-mkdir -p "$OUT/Contents/MacOS" "$RES/engine" "$RES/bin"
+mkdir -p "$OUT/Contents/MacOS" "$OUT/Contents/Frameworks" "$RES/engine" "$RES/bin"
 cp "$BIN" "$OUT/Contents/MacOS/$APP_NAME"
+# Sparkle ships signed by its developers; copy it as-is (ditto keeps the symlinks).
+ditto "$(dirname "$BIN")/Sparkle.framework" "$OUT/Contents/Frameworks/Sparkle.framework"
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$OUT/Contents/MacOS/$APP_NAME"
 
 echo "==> Bundling engine + uv"
 cp "$ROOT/engine/pyproject.toml" "$ROOT/engine/uv.lock" "$ROOT/engine/README.md" "$RES/engine/"
@@ -63,7 +69,10 @@ cat > "$OUT/Contents/Info.plist" <<PLIST
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
-    <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
+    <key>CFBundleVersion</key><string>$VERSION</string>
+    <key>SUFeedURL</key><string>$FEED_URL</string>
+    <key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_KEY</string>
+    <key>SUEnableAutomaticChecks</key><true/>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
