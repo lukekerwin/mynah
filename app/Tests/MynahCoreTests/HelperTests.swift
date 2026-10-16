@@ -69,6 +69,18 @@ struct TranscriptFormatterTests {
         #expect(lines[0].segmentIDs == [1, 2])
         #expect(TranscriptFormatter.engineSegments(segs).count == 4)
         #expect(TranscriptFormatter.timestamp(754) == "12:34")
+    }
+
+    @Test func splitsSameSpeakerAtPausesAndLength() {
+        let segs = [
+            Segment(id: 1, meetingID: "m", track: .others, startS: 0, endS: 3, text: "First person."),
+            Segment(id: 2, meetingID: "m", track: .others, startS: 3.5, endS: 6, text: "Still them."),
+            Segment(id: 3, meetingID: "m", track: .others, startS: 8, endS: 10, text: "Someone else."),  // 2 s pause
+            Segment(id: 4, meetingID: "m", track: .others, startS: 10.5, endS: 30, text: "Long point."),
+            Segment(id: 5, meetingID: "m", track: .others, startS: 30.5, endS: 45, text: "Continued."),  // > 30 s
+        ]
+        #expect(TranscriptFormatter.lines(segs).map(\.text)
+            == ["First person. Still them.", "Someone else. Long point.", "Continued."])
         #expect(TranscriptFormatter.timestamp(3700) == "1:01:40")
     }
 }

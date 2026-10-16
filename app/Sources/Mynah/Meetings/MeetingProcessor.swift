@@ -52,10 +52,11 @@ final class MeetingProcessor {
         count = min(count, Self.maxWindow)
         let url = Self.audioURL(Self.directory(meetingID), track)
         do {
-            let samples = try await Task.detached(priority: .utility) {
+            var samples = try await Task.detached(priority: .utility) {
                 try WAVReader.read(url: url, from: start, count: count)
             }.value
             guard !samples.isEmpty else { return false }
+            if track == .you { samples = try await removeBleed(meetingID: meetingID, you: samples, from: start) }
             let result = try await engine.transcribe(samples: samples, offset: cursor, vocab: vocabulary, final: lastWindow)
             let windowS = Double(samples.count) / Double(Self.sampleRate)
             var consumed = lastWindow ? windowS : min(result.consumed_s, windowS)
@@ -68,6 +69,34 @@ final class MeetingProcessor {
             log.error("transcribe \(meetingID, privacy: .public)/\(track.rawValue, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
+    }
+
+    /// Per meeting: how the call leaks into the mic, from the last window that showed it.
+    private var couplings: [String: BleedGate.Coupling] = [:]
+
+    /// Silences the call audio the mic picked up through the speakers (see BleedGate).
+    private func removeBleed(meetingID: String, you: [Float], from start: Int) async throws -> [Float] {
+        let othersURL = Self.audioURL(Self.directory(meetingID), .others)
+        guard FileManager.default.fileExists(atPath: othersURL.path) else { return you }
+        let lead = min(start, BleedGate.othersLead)
+        let previous = couplings[meetingID]
+        let (out, coupling) = try await Task.detached(priority: .utility) {
+            var others = try WAVReader.read(url: othersURL, from: start - lead, count: lead + you.count)
+            others += [Float](repeating: 0, count: max(0, lead + you.count - others.count))
+            var coupling = previous
+            switch BleedGate.estimate(you: you, others: others, lead: lead) {
+            case let .coupled(c): coupling = c
+            case .uncoupled: coupling = nil
+            case .unknown: break
+            }
+            guard let coupling else { return (you, nil as BleedGate.Coupling?) }
+            return (BleedGate.apply(coupling, you: you, others: others, lead: lead), coupling)
+        }.value
+        if coupling != previous {
+            log.notice("bleed \(meetingID, privacy: .public): \(coupling.map { "lag \($0.lag * 20) ms, \(Int($0.gainDB)) dB" } ?? "none", privacy: .public)")
+        }
+        couplings[meetingID] = coupling
+        return out
     }
 
     /// After the call: transcribe both tracks to the end (waiting for the engine if
@@ -90,10 +119,11 @@ final class MeetingProcessor {
             }
         }
 
+        couplings[meetingID] = nil
+
         do {
             let all = try store.segments(meetingID: meetingID)
-            let echo = EchoFilter.echoIDs(you: all.filter { $0.track == .you }, others: all.filter { $0.track == .others })
-            try store.hide(segmentIDs: echo, reason: "echo")
+            let echo = try hideEcho(meetingID: meetingID)
             let hasSpeech = !(try store.segments(meetingID: meetingID)).isEmpty
             try store.modifyMeeting(id: meetingID) {
                 $0.hasSpeech = hasSpeech
@@ -105,6 +135,15 @@ final class MeetingProcessor {
             try? store.setStatus(meetingID, .failed, error: error.localizedDescription)
         }
         await keepOrDeleteAudio(meetingID: meetingID)
+    }
+
+    /// Hides "You" lines that repeat what the others said (mic leak BleedGate missed).
+    @discardableResult
+    func hideEcho(meetingID: String) throws -> [Int64] {
+        let all = try store.segments(meetingID: meetingID)
+        let echo = EchoFilter.echoIDs(you: all.filter { $0.track == .you }, others: all.filter { $0.track == .others })
+        try store.hide(segmentIDs: echo, reason: "echo")
+        return echo
     }
 
     /// "Delete after transcript" removes the audio now; otherwise the WAVs are

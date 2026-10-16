@@ -239,6 +239,11 @@ struct LiveMeetingCard: View {
         if meetings.permissionProblem { return "Can't hear the call. Allow System Audio Recording in System Settings." }
         if recording.paused { return "Your mic is paused. Everyone else is still being transcribed." }
         if meetings.teamsMuted == true, settings.data.meetings.teamsMuteDetection { return "You're muted in Teams, so only the others are being recorded." }
+        if meetings.teamsMuteUnreadable {
+            return Permissions.accessibilityGranted
+                ? "Can't see Teams' mute button, so your mic is recorded even while you're muted."
+                : "Allow Accessibility in System Settings so Mynah can skip your mic while you're muted in Teams."
+        }
         return "Recording \(recording.app.name) and your mic. The transcript writes itself as the call goes on."
     }
 
