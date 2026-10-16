@@ -80,7 +80,7 @@ Hugging Face) or when you pick a model you haven't downloaded yet. After that My
 
 ## Models
 
-All models can be switched in **Settings › Models**.
+All models can be switched in **Mynah › Settings › Models** (click the bird in the menu bar, then **Open Mynah**).
 
 **Speech recognition** — measured on 20 real dictation clips, with a personal dictionary:
 
@@ -92,7 +92,7 @@ All models can be switched in **Settings › Models**.
 | IBM Granite Speech 4.1 2B (NAR) | 1.6% | 0.16 s | 5.8 GB |
 
 Without a dictionary every model scored 3–4.4%, almost entirely on names and jargon —
-so the biggest accuracy win is adding your own terms in **Settings › Dictionary**.
+so the biggest accuracy win is adding your own terms on the **Dictionary** page.
 
 **Cleanup** — 28 test cases covering fillers, self-corrections, lists, numbers, email/chat/code
 tone, vocabulary, and traps such as "what's the capital of Australia?" that must be transcribed,

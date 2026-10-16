@@ -15,6 +15,8 @@ public struct MeetingSettings: Codable, Equatable, Sendable {
     public var pauseMicShortcut = true
     /// Drop the mic while Teams shows you as muted (read through Accessibility).
     public var teamsMuteDetection = true
+    /// Show the live transcript pill at the right edge of the screen while recording.
+    public var liveTranscript = true
 
     public init() {}
 
@@ -30,6 +32,7 @@ public struct MeetingSettings: Codable, Equatable, Sendable {
         myName = try c.decodeIfPresent(String.self, forKey: .myName) ?? d.myName
         pauseMicShortcut = try c.decodeIfPresent(Bool.self, forKey: .pauseMicShortcut) ?? d.pauseMicShortcut
         teamsMuteDetection = try c.decodeIfPresent(Bool.self, forKey: .teamsMuteDetection) ?? d.teamsMuteDetection
+        liveTranscript = try c.decodeIfPresent(Bool.self, forKey: .liveTranscript) ?? d.liveTranscript
     }
 }
 

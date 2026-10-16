@@ -5,8 +5,9 @@ Meeting capture is **off by default**. Turn it on in **Settings › Meetings**. 
 ### What to try
 - Join a Teams call. Recording starts automatically, or asks first if you choose "Ask me". The menu bar shows a red dot and a timer.
 - **Pause My Mic** (menu or ⌃⌥M) and Teams mute both keep your words out of the transcript.
-- Other apps: menu bar › **Record Meeting ›**, then pick the app or **All System Audio**.
-- **Meetings & To-dos…** opens a window with search, summaries, transcripts and your action items.
+- Other apps: menu bar › **Record a meeting**, then pick the app or **All System Audio**.
+- **Meetings** and **To-dos** pages in the Mynah window: search, notes, transcripts (filter by You / Others) and your action items.
+- While a call is recorded, a small pill sits at the right edge of the screen. Hover over it to read the transcript as it's written, pin it to keep it open, pause your mic or stop from there. Turn it off under Settings › Meetings › Live transcript.
 
 ### Known limitations
 - Speakers are only told apart as **You** and **Others**.

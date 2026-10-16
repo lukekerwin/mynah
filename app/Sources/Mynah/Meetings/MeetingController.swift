@@ -47,7 +47,10 @@ final class MeetingController: ObservableObject {
     let processor: MeetingProcessor
     let summaries: SummaryRunner
     let notifications = MeetingNotifications()
-    let window = MeetingsWindowController()
+    /// Opens the Meetings page in the app window (set by AppController).
+    var onShowMeetings: ((String?) -> Void)?
+    /// Live transcript pill at the screen edge; nil until launch (and in previews that don't want it).
+    var livePanel: LiveTranscriptController?
 
     private let settings: SettingsStore
     private let engine: EngineClient
@@ -105,7 +108,7 @@ final class MeetingController: ObservableObject {
         notifications.onRecord = { [weak self] in self?.acceptAsk() }
         notifications.onIgnore = { [weak self] in self?.declineAsk() }
         notifications.onOpen = { [weak self] id in self?.showMeetings(focus: id) }
-        window.controller = self
+        livePanel = LiveTranscriptController(meetings: self, settings: settings)
 
         detector.onCallStarted = { [weak self] in self?.callStarted() }
         detector.onCallEnded = { [weak self] in self?.callEnded() }
@@ -357,11 +360,12 @@ final class MeetingController: ObservableObject {
                 Task { @MainActor in self?.readTeamsWindow() }
             }
         }
-        // Transcribe in bursts: each track every 30 s, staggered by 15 s.
+        // Transcribe in bursts: each track every 16 s, staggered by 8 s, so the live
+        // transcript keeps up with the call without hogging the engine.
         loopTask = Task { [weak self] in
             var track = Track.others
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
                 guard let self, !Task.isCancelled, #available(macOS 14.2, *),
                       let session = self.session as? MeetingSession, session.meetingID == meetingID else { return }
                 await self.processor.transcribe(meetingID: meetingID, track: track,
@@ -525,7 +529,33 @@ final class MeetingController: ObservableObject {
     }
 
     func showMeetings(focus meetingID: String? = nil) {
-        window.show(focus: meetingID)
+        onShowMeetings?(meetingID)
+    }
+
+    /// `MYNAH_UI_PREVIEW=livepanel`: pretend a call is being recorded, feeding demo lines
+    /// into the store every few seconds so the live transcript pill can be seen and styled.
+    func previewRecording(meetingID: String, title: String, script: [(Track, String)]) {
+        state = .recording(Recording(meetingID: meetingID, title: title, since: Date().addingTimeInterval(-754),
+                                     app: AudioApp(bundlePrefix: MeetingDetector.teamsPrefix, name: "Microsoft Teams"),
+                                     manual: false))
+        livePanel = LiveTranscriptController(meetings: self, settings: settings)
+        ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.updateElapsed() }
+        }
+        updateElapsed()
+        // Screenshots: open the card and show a conversation straight away.
+        let shot = ProcessInfo.processInfo.environment["MYNAH_UI_SHOT"] != nil
+        if shot { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.livePanel?.pinOpen() } }
+        Task {
+            var t = 0.0
+            for (index, (track, text)) in script.enumerated() {
+                let seconds = Double(text.split(separator: " ").count) / 2.6
+                try? store.appendSegments(meetingID: meetingID, track: track, [(start: t, end: t + seconds, text: text)],
+                                          cursor: t + seconds)
+                t += seconds + 0.8
+                if !shot || index >= 4 { try? await Task.sleep(nanoseconds: UInt64(min(seconds, 4) * 1_000_000_000)) }
+            }
+        }
     }
 
     /// Setup step: start a short tap so macOS shows the System Audio Recording prompt.

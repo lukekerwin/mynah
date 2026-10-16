@@ -115,6 +115,12 @@ final class EngineClient: ObservableObject {
             }
         }
 
+        /// `summary` as a full sentence, for use inside longer copy.
+        var sentence: String {
+            let s = summary
+            return s.hasSuffix("…") || s.hasSuffix(".") ? s : s + "."
+        }
+
         private static func gb(_ bytes: Int64) -> String {
             String(format: "%.1f GB", Double(bytes) / 1e9)
         }
