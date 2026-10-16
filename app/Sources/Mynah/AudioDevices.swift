@@ -30,10 +30,21 @@ enum AudioDevices {
     /// The device to record from: the user's choice while it's connected, otherwise the
     /// built-in mic. Never follows the system default, which macOS switches to Bluetooth
     /// headsets on connect — recording from those drops playback to call quality.
-    /// `nil` (no built-in mic either) leaves the engine on the system default.
+    /// Macs without a built-in mic fall back to the system default.
     static func resolve(uid: String) -> AudioDeviceID? {
         let all = inputs()
-        return (all.first { $0.uid == uid } ?? all.first(where: \.isBuiltIn))?.id
+        return (all.first { $0.uid == uid } ?? all.first(where: \.isBuiltIn))?.id ?? defaultInputID
+    }
+
+    private static var defaultInputID: AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice,
+                                                 mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var id = AudioDeviceID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &id) == noErr,
+              id != kAudioObjectUnknown else { return nil }
+        return id
     }
 
     private static func device(_ id: AudioDeviceID) -> InputDevice? {
