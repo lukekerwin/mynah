@@ -4,20 +4,29 @@ import AVFoundation
 
 enum RecorderError: LocalizedError {
     case noInputDevice
+    case coreAudio(String, OSStatus)
 
-    var errorDescription: String? { "No microphone available" }
+    var errorDescription: String? {
+        switch self {
+        case .noInputDevice: return "No microphone available"
+        case let .coreAudio(step, status): return "Microphone error (\(step): \(status))"
+        }
+    }
 }
 
-/// Captures from the chosen input device and resamples to 16 kHz mono Float32.
+/// Captures from one specific input device and resamples to 16 kHz mono Float32.
 ///
-/// A fresh engine is built per recording and released afterwards: an idle `AVAudioEngine`
-/// keeps its input unit attached to the device, which holds Bluetooth headsets in
-/// low-quality hands-free mode even between dictations.
+/// Talks to a HAL audio unit directly rather than `AVAudioEngine`: on recent macOS the
+/// engine's input node rebuilds itself around the *system default* input whenever it
+/// reconfigures, silently undoing any device choice. With a Bluetooth headset as the
+/// default, that both breaks recording and drops the headset to call quality.
+/// The unit is created per recording and disposed afterwards so nothing holds the mic.
 final class AudioRecorder {
     /// RMS level of each captured chunk, delivered on the main queue.
     var onLevel: ((Float) -> Void)?
 
-    private var engine: AVAudioEngine?
+    private var unit: AudioUnit?
+    private var buffer: AVAudioPCMBuffer?
     private var converter: AVAudioConverter?
     private var samples: [Float] = []
     private let lock = NSLock()
@@ -27,45 +36,87 @@ final class AudioRecorder {
 
     /// - Parameter deviceUID: Core Audio UID of the mic to use (see `AudioDevices.resolve`).
     func start(deviceUID: String) throws {
+        guard !isRecording else { return }
+        guard var device = AudioDevices.resolve(uid: deviceUID) else { throw RecorderError.noInputDevice }
         lock.lock()
         samples.removeAll(keepingCapacity: true)
         lock.unlock()
 
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
-        if var device = AudioDevices.resolve(uid: deviceUID), let unit = input.audioUnit {
-            AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
-                                 &device, UInt32(MemoryLayout<AudioDeviceID>.size))
-        }
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else { throw RecorderError.noInputDevice }
-        converter = AVAudioConverter(from: format, to: target)
+        var desc = AudioComponentDescription(componentType: kAudioUnitType_Output,
+                                             componentSubType: kAudioUnitSubType_HALOutput,
+                                             componentManufacturer: kAudioUnitManufacturer_Apple,
+                                             componentFlags: 0, componentFlagsMask: 0)
+        guard let component = AudioComponentFindNext(nil, &desc) else { throw RecorderError.noInputDevice }
+        var created: AudioUnit?
+        try check(AudioComponentInstanceNew(component, &created), "open")
+        guard let unit = created else { throw RecorderError.noInputDevice }
 
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.process(buffer)
-        }
-        engine.prepare()
         do {
-            try engine.start()
+            var on: UInt32 = 1, off: UInt32 = 0
+            try set(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &on, "enable input")
+            try set(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0, &off, "disable output")
+            try set(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &device, "select device")
+
+            var hardware = AudioStreamBasicDescription()
+            var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+            try check(AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 1,
+                                           &hardware, &size), "read format")
+            guard hardware.mSampleRate > 0, hardware.mChannelsPerFrame > 0 else { throw RecorderError.noInputDevice }
+
+            // Take the first channel at the device's own rate; AVAudioConverter handles 16 kHz.
+            let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: hardware.mSampleRate,
+                                       channels: 1, interleaved: false)!
+            var client = format.streamDescription.pointee
+            try set(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &client, "set format")
+
+            var maxFrames: UInt32 = 4096
+            size = UInt32(MemoryLayout<UInt32>.size)
+            AudioUnitGetProperty(unit, kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global, 0,
+                                 &maxFrames, &size)
+            buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: max(maxFrames, 4096))
+            converter = AVAudioConverter(from: format, to: target)
+
+            var callback = AURenderCallbackStruct(inputProc: inputCallback,
+                                                  inputProcRefCon: Unmanaged.passUnretained(self).toOpaque())
+            try set(unit, kAudioOutputUnitProperty_SetInputCallback, kAudioUnitScope_Global, 0, &callback, "callback")
+
+            self.unit = unit
+            try check(AudioUnitInitialize(unit), "initialize")
+            try check(AudioOutputUnitStart(unit), "start")
         } catch {
-            input.removeTap(onBus: 0)
+            teardown(unit)
             throw error
         }
-        self.engine = engine
         isRecording = true
     }
 
     /// Stops capture and returns everything recorded since `start()`.
     func stop() -> [Float] {
-        guard isRecording, let engine else { return [] }
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        self.engine = nil
-        converter = nil
+        guard isRecording, let unit else { return [] }
+        teardown(unit)
         isRecording = false
         lock.lock()
         defer { lock.unlock() }
         return samples
+    }
+
+    private func teardown(_ unit: AudioUnit) {
+        AudioOutputUnitStop(unit)  // synchronous: no callbacks run after this returns
+        AudioUnitUninitialize(unit)
+        AudioComponentInstanceDispose(unit)
+        self.unit = nil
+        buffer = nil
+        converter = nil
+    }
+
+    /// Runs on the HAL's I/O thread.
+    fileprivate func render(_ flags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
+                            _ time: UnsafePointer<AudioTimeStamp>, _ bus: UInt32, _ frames: UInt32) -> OSStatus {
+        guard let unit, let buffer, frames <= buffer.frameCapacity else { return noErr }
+        buffer.frameLength = frames
+        let status = AudioUnitRender(unit, flags, time, bus, frames, buffer.mutableAudioBufferList)
+        if status == noErr { process(buffer) }
+        return status
     }
 
     private func process(_ buffer: AVAudioPCMBuffer) {
@@ -95,4 +146,20 @@ final class AudioRecorder {
         lock.unlock()
         DispatchQueue.main.async { [weak self] in self?.onLevel?(rms) }
     }
+
+    private func check(_ status: OSStatus, _ step: String) throws {
+        guard status == noErr else { throw RecorderError.coreAudio(step, status) }
+    }
+
+    private func set<T>(_ unit: AudioUnit, _ property: AudioUnitPropertyID, _ scope: AudioUnitScope,
+                        _ element: AudioUnitElement, _ value: inout T, _ step: String) throws {
+        let status = withUnsafePointer(to: &value) {
+            AudioUnitSetProperty(unit, property, scope, element, $0, UInt32(MemoryLayout<T>.size))
+        }
+        try check(status, step)
+    }
+}
+
+private let inputCallback: AURenderCallback = { refCon, flags, time, bus, frames, _ in
+    Unmanaged<AudioRecorder>.fromOpaque(refCon).takeUnretainedValue().render(flags, time, bus, frames)
 }
