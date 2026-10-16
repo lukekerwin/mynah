@@ -1,4 +1,4 @@
-**Beta: not the stable release.** It adds **meeting capture**: Mynah notices when a Microsoft Teams call starts, records the call's audio and your mic as separate tracks, writes a timestamped transcript during the call, and afterwards writes a summary and a to-do list from the action items. Everything runs and stays on your Mac.
+**Beta: not the stable release.** This build has the redesigned app window, menu bar panel and overlay, plus **meeting capture**: Mynah notices when a Microsoft Teams call starts, records the call's audio and your mic as separate tracks, writes a timestamped transcript during the call, and afterwards writes a summary and a to-do list from the action items. Everything runs and stays on your Mac.
 
 Meeting capture is **off by default**. Turn it on in **Settings › Meetings**. The setup asks for Notifications and **System Audio Recording** permission. Dictation works the same as in 0.1.x.
 
