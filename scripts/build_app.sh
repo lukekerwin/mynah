@@ -70,6 +70,7 @@ cat > "$OUT/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key><true/>
     <key>NSHumanReadableCopyright</key><string>© $(date +%Y) Luke Kerwin. MIT License.</string>
     <key>NSMicrophoneUsageDescription</key><string>Mynah listens while you hold the dictation key and transcribes your speech locally on this Mac.</string>
+    <key>NSAudioCaptureUsageDescription</key><string>Mynah records the audio of calls you choose to capture so it can transcribe them locally on this Mac.</string>
 </dict>
 </plist>
 PLIST

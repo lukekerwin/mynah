@@ -33,3 +33,22 @@ class Asr:
             kwargs["hotwords"] = vocab
         out = self.model.generate(mx.array(audio, dtype=mx.float32), **kwargs)
         return out.text.strip()
+
+    def transcribe_aligned(self, audio: np.ndarray, vocab: list[str] | None = None) -> list[tuple[float, float, str]]:
+        """Like `transcribe`, but split into timed pieces: (start_s, end_s, text),
+        relative to the start of `audio`. Parakeet gives sentences, Whisper-style
+        models give segments; anything else comes back as one piece."""
+        kwargs = dict(self.spec.generate_kwargs)
+        if vocab and self.spec.hotwords:
+            kwargs["hotwords"] = vocab
+        out = self.model.generate(mx.array(audio, dtype=mx.float32), **kwargs)
+        pieces: list[tuple[float, float, str]] = []
+        for s in getattr(out, "sentences", None) or []:
+            pieces.append((float(s.start), float(s.end), s.text.strip()))
+        if not pieces:
+            for s in getattr(out, "segments", None) or []:
+                if isinstance(s, dict) and "start" in s and "end" in s:
+                    pieces.append((float(s["start"]), float(s["end"]), str(s.get("text", "")).strip()))
+        if not pieces:
+            pieces.append((0.0, len(audio) / SAMPLE_RATE, out.text.strip()))
+        return [p for p in pieces if p[2]]

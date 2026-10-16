@@ -8,9 +8,10 @@ struct MynahApp: App {
     var body: some Scene {
         MenuBarExtra {
             MenuContent(controller: delegate.controller, engine: delegate.controller.engine,
-                        history: delegate.controller.history)
+                        history: delegate.controller.history, probe: delegate.controller.probe)
         } label: {
-            MenuIcon(controller: delegate.controller, engine: delegate.controller.engine)
+            MenuIcon(controller: delegate.controller, engine: delegate.controller.engine,
+                     meetings: delegate.controller.meetings)
         }
 
         Window("Mynah Settings", id: "settings") {
@@ -37,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct MenuIcon: View {
     @ObservedObject var controller: AppController
     @ObservedObject var engine: EngineClient
+    let meetings: MeetingController?
 
     private static let bird: NSImage? = {
         let image = NSImage(named: "MenuBarIcon")
@@ -45,6 +47,15 @@ struct MenuIcon: View {
     }()
 
     var body: some View {
+        if let meetings {
+            MeetingAwareIcon(meetings: meetings, dictating: controller.phase != .idle) { base }
+        } else {
+            base
+        }
+    }
+
+    @ViewBuilder
+    private var base: some View {
         if let symbol {
             Image(systemName: symbol)
         } else if let bird = Self.bird {
@@ -73,6 +84,7 @@ struct MenuContent: View {
     @ObservedObject var controller: AppController
     @ObservedObject var engine: EngineClient
     @ObservedObject var history: HistoryStore
+    @ObservedObject var probe: MeetingProbe
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -81,6 +93,9 @@ struct MenuContent: View {
             Button("⚠︎ Permissions needed…") { openSettings() }
         }
         Divider()
+        if let meetings = controller.meetings {
+            MeetingMenuSection(meetings: meetings, settings: controller.settings)
+        }
         if !history.recent.isEmpty {
             Text("Recent — click to copy")
             ForEach(history.recent.prefix(5)) { entry in
@@ -110,6 +125,28 @@ struct MenuContent: View {
             Button("Restart Engine") { controller.startEngine() }
             Button("Open Engine Log") { NSWorkspace.shared.open(EngineClient.logFile) }
         }
+        if MeetingProbe.enabled {
+            Menu("Debug") {
+                if !probe.status.isEmpty { Text(probe.status) }
+                Button(probe.logging ? "Stop Logging Audio Processes" : "Log Audio Processes") { probe.toggleLogging() }
+                Button(probe.recording ? "Stop Recording Teams + Mic" : "Record Teams + Mic") { probe.toggleRecording() }
+                Button("Dump Teams Accessibility Tree") { probe.dumpTeamsAccessibility() }
+                if let meetings = controller.meetings {
+                    Button("Import Probe Recording as Meeting…") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseDirectories = true
+                        panel.canChooseFiles = false
+                        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop")
+                        NSApp.activate(ignoringOtherApps: true)
+                        if panel.runModal() == .OK, let url = panel.url { meetings.importProbe(url) }
+                    }
+                }
+                Button("Open Meetings Log") {
+                    if !FileManager.default.fileExists(atPath: MeetingProbe.logURL.path) { probe.write("log opened") }
+                    NSWorkspace.shared.open(MeetingProbe.logURL)
+                }
+            }
+        }
         Divider()
         Button("Quit Mynah") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
@@ -134,3 +171,71 @@ struct MenuContent: View {
         return flat.count > 48 ? String(flat.prefix(48)) + "…" : flat
     }
 }
+
+/// While a meeting records (and no dictation is in progress): a red dot + timer.
+struct MeetingAwareIcon<Base: View>: View {
+    @ObservedObject var meetings: MeetingController
+    let dictating: Bool
+    @ViewBuilder var base: () -> Base
+
+    var body: some View {
+        if meetings.isRecording, !dictating {
+            HStack(spacing: 3) {
+                Image(nsImage: recordingDot)
+                Text(meetings.elapsed).monospacedDigit()
+            }
+        } else {
+            base()
+        }
+    }
+}
+
+struct MeetingMenuSection: View {
+    @ObservedObject var meetings: MeetingController
+    @ObservedObject var settings: SettingsStore
+
+    var body: some View {
+        switch meetings.state {
+        case let .recording(r):
+            Text("● Recording “\(r.title)” — \(meetings.elapsed)")
+            if meetings.permissionProblem {
+                Button("⚠︎ Can't hear the call — check permission…") {
+                    Permissions.openSettings("Privacy_ScreenCapture")
+                }
+            } else if r.paused {
+                Text("Your mic is paused")
+            } else if meetings.teamsMuted == true, settings.data.meetings.teamsMuteDetection {
+                Text("Muted in Teams — not recording you")
+            }
+            Button(r.paused ? "Resume My Mic" : "Pause My Mic") { meetings.togglePauseMic() }
+            Button("Stop Recording") { meetings.stop(discard: false) }
+            Button("Stop & Discard…") { meetings.confirmDiscard() }
+            Divider()
+        case .asking:
+            Text("Teams call in progress")
+            Button("Record This Call") { meetings.recordAskedCall() }
+            Divider()
+        case .idle:
+            Menu("Record Meeting") {
+                ForEach(meetings.audioApps()) { app in
+                    Button(app.name) { meetings.startManual(app) }
+                }
+            }
+        default:
+            EmptyView()
+        }
+        if settings.data.meetings.enabled || (try? meetings.store.allMeetings().isEmpty) == false {
+            Button("Meetings & To-dos…") { meetings.showMeetings() }
+            Divider()
+        }
+    }
+}
+
+/// Red (non-template, so the menu bar keeps its color) recording dot.
+let recordingDot: NSImage = {
+    let config = NSImage.SymbolConfiguration(paletteColors: [.systemRed])
+    let image = NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "Recording meeting")?
+        .withSymbolConfiguration(config) ?? NSImage()
+    image.isTemplate = false
+    return image
+}()

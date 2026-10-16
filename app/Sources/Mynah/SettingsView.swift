@@ -16,12 +16,14 @@ struct SettingsView: View {
                 .tabItem { Label("Dictionary", systemImage: "character.book.closed") }
             SnippetsTab(settings: settings)
                 .tabItem { Label("Snippets", systemImage: "text.badge.plus") }
+            MeetingsTab(settings: settings, engine: engine, meetings: controller.meetings)
+                .tabItem { Label("Meetings", systemImage: "person.2.wave.2") }
             PermissionsTab(controller: controller)
                 .tabItem { Label("Permissions", systemImage: "lock.shield") }
             AboutTab()
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 560, height: 440)
+        .frame(width: 600, height: 520)
     }
 }
 
