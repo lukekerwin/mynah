@@ -1,6 +1,8 @@
 name: Release
 
 # Push a tag like v0.2.0 (matching the VERSION file) to build and publish a DMG.
+# Tags with a suffix (v0.2.0-beta.1) become pre-releases with .github/prerelease-notes.md,
+# so the "Latest" release people download stays the stable one.
 on:
   push:
     tags: ["v*"]
@@ -25,5 +27,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          flags=(--notes-file .github/release-notes.md)
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            flags=(--prerelease --latest=false --notes-file .github/prerelease-notes.md)
+          fi
           gh release create "$GITHUB_REF_NAME" dist/Mynah-*.dmg dist/Mynah-*.dmg.sha256 \
-            --title "Mynah $(cat VERSION)" --notes-file .github/release-notes.md
+            --title "Mynah $(cat VERSION)" "${flags[@]}"

@@ -1,4 +1,5 @@
 import Accelerate
+import AudioToolbox
 import AVFoundation
 import Foundation
 import MynahCore
@@ -164,10 +165,12 @@ final class TrackWriter {
     }
 }
 
-/// The user's side of a meeting: its own AVAudioEngine on the default input
-/// (separate from dictation's recorder; never voice-processing, which would duck
-/// the call). While gated (dictating, paused, muted) it writes silence instead,
-/// so both tracks keep the same timeline.
+/// The user's side of a meeting: the mic chosen in Settings (same as dictation),
+/// through its own HAL audio unit — `AVAudioEngine` follows the system default
+/// input, and voice processing would duck the call. While gated (dictating,
+/// paused, muted) it writes silence instead, so both tracks share one timeline.
+/// If the chosen mic disconnects or comes back, capture moves to the device
+/// `AudioDevices.resolve` picks.
 final class MeetingMic {
     struct Gate: Equatable {
         var dictating = false
@@ -180,50 +183,128 @@ final class MeetingMic {
     let ring: RingBuffer
     let gate = OSAllocatedUnfairLock(initialState: Gate())
     private(set) var sampleRate: Double = 48_000
-    /// Called (main queue) when the input device's sample rate changes.
+    /// Called (main queue) when the device's sample rate changes after a switch.
     var onRateChange: ((Double) -> Void)?
-    private let engine = AVAudioEngine()
-    private var configObserver: NSObjectProtocol?
 
-    init(ring: RingBuffer) {
+    private let deviceUID: String
+    private var device = AudioDeviceID(kAudioObjectUnknown)
+    private var unit: AudioUnit?
+    private var buffer: AVAudioPCMBuffer?
+    private var devicesListener: AudioObjectPropertyListenerBlock?
+
+    init(ring: RingBuffer, deviceUID: String) {
         self.ring = ring
+        self.deviceUID = deviceUID
     }
 
     deinit { stop() }
 
     func start() throws {
-        try install()
-        configObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
-            // Input device changed (e.g. headphones): restart on the new device.
-            guard let self else { return }
-            let old = self.sampleRate
-            self.engine.inputNode.removeTap(onBus: 0)
-            try? self.install()
-            if self.sampleRate != old { self.onRateChange?(self.sampleRate) }
+        try open()
+        var addr = CoreAudioProcesses.address(kAudioHardwarePropertyDevices)
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.devicesChanged() }
+        if AudioObjectAddPropertyListenerBlock(CoreAudioProcesses.system, &addr, .main, block) == noErr {
+            devicesListener = block
         }
     }
 
     func stop() {
-        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
-        configObserver = nil
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        if let devicesListener {
+            var addr = CoreAudioProcesses.address(kAudioHardwarePropertyDevices)
+            AudioObjectRemovePropertyListenerBlock(CoreAudioProcesses.system, &addr, .main, devicesListener)
+            self.devicesListener = nil
+        }
+        close()
     }
 
-    private func install() throws {
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else { throw RecorderError.noInputDevice }
-        sampleRate = format.sampleRate
-        let ring = self.ring
-        let gate = self.gate
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
-            guard let channel = buffer.floatChannelData?[0] else { return }
-            let closed = gate.withLock { $0.closed }
-            ring.write(channel, count: Int(buffer.frameLength), zero: closed)
-        }
-        engine.prepare()
-        try engine.start()
+    private func devicesChanged() {
+        guard unit != nil, let wanted = AudioDevices.resolve(uid: deviceUID), wanted != device else { return }
+        let old = sampleRate
+        close()
+        try? open()
+        if sampleRate != old { onRateChange?(sampleRate) }
     }
+
+    private func open() throws {
+        guard var device = AudioDevices.resolve(uid: deviceUID) else { throw RecorderError.noInputDevice }
+        var desc = AudioComponentDescription(componentType: kAudioUnitType_Output,
+                                             componentSubType: kAudioUnitSubType_HALOutput,
+                                             componentManufacturer: kAudioUnitManufacturer_Apple,
+                                             componentFlags: 0, componentFlagsMask: 0)
+        guard let component = AudioComponentFindNext(nil, &desc) else { throw RecorderError.noInputDevice }
+        var created: AudioUnit?
+        try check(AudioComponentInstanceNew(component, &created), "open")
+        guard let unit = created else { throw RecorderError.noInputDevice }
+        do {
+            var on: UInt32 = 1, off: UInt32 = 0
+            try set(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &on, "enable input")
+            try set(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0, &off, "disable output")
+            try set(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &device, "select device")
+            var hardware = AudioStreamBasicDescription()
+            var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+            try check(AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 1,
+                                           &hardware, &size), "read format")
+            guard hardware.mSampleRate > 0, hardware.mChannelsPerFrame > 0 else { throw RecorderError.noInputDevice }
+            let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: hardware.mSampleRate,
+                                       channels: 1, interleaved: false)!
+            var client = format.streamDescription.pointee
+            try set(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &client, "set format")
+            var maxFrames: UInt32 = 4096
+            size = UInt32(MemoryLayout<UInt32>.size)
+            AudioUnitGetProperty(unit, kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global, 0, &maxFrames, &size)
+            buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: max(maxFrames, 4096))
+            var callback = AURenderCallbackStruct(inputProc: meetingMicCallback,
+                                                  inputProcRefCon: Unmanaged.passUnretained(self).toOpaque())
+            try set(unit, kAudioOutputUnitProperty_SetInputCallback, kAudioUnitScope_Global, 0, &callback, "callback")
+            self.unit = unit
+            self.device = device
+            sampleRate = hardware.mSampleRate
+            try check(AudioUnitInitialize(unit), "initialize")
+            try check(AudioOutputUnitStart(unit), "start")
+        } catch {
+            dispose(unit)
+            throw error
+        }
+    }
+
+    private func close() {
+        if let unit { dispose(unit) }
+    }
+
+    private func dispose(_ unit: AudioUnit) {
+        AudioOutputUnitStop(unit)  // synchronous: no callbacks after this returns
+        AudioUnitUninitialize(unit)
+        AudioComponentInstanceDispose(unit)
+        self.unit = nil
+        buffer = nil
+    }
+
+    /// HAL I/O thread: pull the samples and copy them into the ring (or silence).
+    fileprivate func render(_ flags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
+                            _ time: UnsafePointer<AudioTimeStamp>, _ bus: UInt32, _ frames: UInt32) -> OSStatus {
+        guard let unit, let buffer, frames <= buffer.frameCapacity else { return noErr }
+        buffer.frameLength = frames
+        let status = AudioUnitRender(unit, flags, time, bus, frames, buffer.mutableAudioBufferList)
+        if status == noErr, let channel = buffer.floatChannelData?[0] {
+            let closed = gate.withLock { $0.closed }
+            ring.write(channel, count: Int(frames), zero: closed)
+        }
+        return status
+    }
+
+    private func check(_ status: OSStatus, _ step: String) throws {
+        guard status == noErr else { throw RecorderError.coreAudio(step, status) }
+    }
+
+    private func set<T>(_ unit: AudioUnit, _ property: AudioUnitPropertyID, _ scope: AudioUnitScope,
+                        _ element: AudioUnitElement, _ value: inout T, _ step: String) throws {
+        let status = withUnsafePointer(to: &value) {
+            AudioUnitSetProperty(unit, property, scope, element, $0, UInt32(MemoryLayout<T>.size))
+        }
+        try check(status, step)
+    }
+}
+
+private let meetingMicCallback: AURenderCallback = { refCon, flags, time, bus, frames, _ in
+    Unmanaged<MeetingMic>.fromOpaque(refCon).takeUnretainedValue().render(flags, time, bus, frames)
 }

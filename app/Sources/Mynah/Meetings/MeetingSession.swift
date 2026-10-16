@@ -17,9 +17,12 @@ final class MeetingSession {
     /// The tap has delivered at least one non-zero sample (permission is granted).
     private(set) var othersEverHeard = false
 
-    init(meetingID: String, directory: URL) {
+    private let micUID: String
+
+    init(meetingID: String, directory: URL, micUID: String) {
         self.meetingID = meetingID
         self.directory = directory
+        self.micUID = micUID
     }
 
     func start(target: ProcessTap.Target) async throws {
@@ -29,7 +32,7 @@ final class MeetingSession {
 
         let tap = ProcessTap(target: target, ring: othersRing)
         try await Task.detached(priority: .userInitiated) { try tap.start() }.value  // ≤ 2 s
-        let mic = MeetingMic(ring: youRing)
+        let mic = MeetingMic(ring: youRing, deviceUID: micUID)
         do {
             try mic.start()
         } catch {

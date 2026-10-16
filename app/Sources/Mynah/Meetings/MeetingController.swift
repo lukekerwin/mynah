@@ -246,7 +246,8 @@ final class MeetingController: ObservableObject {
             return
         }
         let target = tapTarget(for: app)
-        let session = MeetingSession(meetingID: meeting.id, directory: MeetingProcessor.directory(meeting.id))
+        let session = MeetingSession(meetingID: meeting.id, directory: MeetingProcessor.directory(meeting.id),
+                                     micUID: settings.data.inputDevice)
         self.session = session
         state = .recording(Recording(meetingID: meeting.id, title: meeting.title, since: Date(), app: app, manual: manual))
         permissionProblem = false

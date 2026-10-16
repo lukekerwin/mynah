@@ -55,6 +55,7 @@ final class AppController: ObservableObject {
 
     init() {
         probe.enginePID = { [weak engine] in engine?.pid }
+        probe.micDeviceUID = { [weak settings] in settings?.data.inputDevice ?? "" }
         recorder.onLevel = { [weak self] level in self?.overlay.model.push(level: level) }
         hotkey.onPress = { [weak self] command in self?.handlePress(command: command) }
         hotkey.onRelease = { [weak self] in self?.handleRelease() }

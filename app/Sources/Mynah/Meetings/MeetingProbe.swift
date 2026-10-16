@@ -18,6 +18,7 @@ final class MeetingProbe: ObservableObject {
     @Published private(set) var status = ""
 
     var enginePID: () -> pid_t? = { nil }
+    var micDeviceUID: () -> String = { AudioDevices.builtInUID ?? "" }
 
     private let monitor = AudioActivityMonitor()
     private var lastSnapshot: [AudioProcess] = []
@@ -104,6 +105,7 @@ final class MeetingProbe: ObservableObject {
         silentWarned = false
         tapEverHeard = false
 
+        let micUID = micDeviceUID()
         let othersRing = RingBuffer(capacity: 48_000 * 10)
         let youRing = RingBuffer(capacity: 48_000 * 10)
         Task.detached(priority: .userInitiated) {
@@ -113,7 +115,7 @@ final class MeetingProbe: ObservableObject {
                 try tap.start()  // blocks ≤ 2 s while checking for callbacks
                 let others = try TrackWriter(url: dir.appendingPathComponent("others.wav"), sourceRate: tap.sampleRate,
                                              ring: othersRing)
-                let mic = MeetingMic(ring: youRing)
+                let mic = MeetingMic(ring: youRing, deviceUID: micUID)
                 try mic.start()
                 let you = try TrackWriter(url: dir.appendingPathComponent("you.wav"), sourceRate: mic.sampleRate, ring: youRing)
                 others.start()
