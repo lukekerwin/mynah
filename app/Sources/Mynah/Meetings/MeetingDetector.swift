@@ -5,6 +5,10 @@ import Foundation
 /// (so device switches and reconnects don't split a meeting). Matches the Teams
 /// bundle prefix only — other processes (e.g. Siri's CoreSpeech) hold the mic
 /// permanently.
+///
+/// Mynah's own mic keeps the input device running while it records, so the
+/// device-level change events stop arriving once a call starts; during a call the
+/// state is also polled.
 @MainActor
 final class MeetingDetector {
     nonisolated static let teamsPrefix = "com.microsoft.teams2"
@@ -19,6 +23,7 @@ final class MeetingDetector {
     private(set) var teamsProcesses: [AudioProcess] = []
     private let monitor = AudioActivityMonitor()
     private var endTimer: Timer?
+    private var pollTimer: Timer?
     private var running = false
 
     func start() {
@@ -34,7 +39,15 @@ final class MeetingDetector {
         monitor.stop()
         endTimer?.invalidate()
         endTimer = nil
-        inCall = false
+        setInCall(false)
+    }
+
+    private func setInCall(_ on: Bool) {
+        inCall = on
+        pollTimer?.invalidate()
+        pollTimer = on ? Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refresh() }
+        } : nil
     }
 
     private func refresh() {
@@ -49,7 +62,7 @@ final class MeetingDetector {
             endTimer?.invalidate()
             endTimer = nil
             if !inCall {
-                inCall = true
+                setInCall(true)
                 onCallStarted?()
             }
         } else if inCall, endTimer == nil {
@@ -57,7 +70,7 @@ final class MeetingDetector {
                 Task { @MainActor in
                     guard let self, self.inCall else { return }
                     self.endTimer = nil
-                    self.inCall = false
+                    self.setInCall(false)
                     self.onCallEnded?()
                 }
             }

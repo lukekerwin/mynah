@@ -14,6 +14,8 @@ enum TeamsAccessibility {
     struct CallState {
         var title: String?
         var muted: Bool?
+        /// The call window (one with a "Leave" button) is open; nil if it can't be checked.
+        var windowOpen: Bool?
     }
 
     private struct Found {
@@ -29,22 +31,22 @@ enum TeamsAccessibility {
     private static let researchAfter: TimeInterval = 10
 
     static func read() -> CallState {
-        guard Permissions.accessibilityGranted,
-              let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == MeetingDetector.teamsPrefix })
-        else { return CallState() }
+        guard Permissions.accessibilityGranted else { return CallState() }
+        guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == MeetingDetector.teamsPrefix })
+        else { return CallState(windowOpen: false) }
         lock.lock()
         defer { lock.unlock() }
         if let f = found, f.pid == app.processIdentifier,
            let title = AXDump.attr(f.window, kAXTitleAttribute) as? String {
             let muted = f.mic.flatMap(micState)
             if muted != nil || Date().timeIntervalSince(f.at) < researchAfter {
-                return CallState(title: TeamsUI.meetingTitle(windowTitle: title), muted: muted)
+                return CallState(title: TeamsUI.meetingTitle(windowTitle: title), muted: muted, windowOpen: true)
             }
         }
         found = search(app.processIdentifier)
-        guard let f = found else { return CallState() }
+        guard let f = found else { return CallState(windowOpen: false) }
         let title = AXDump.attr(f.window, kAXTitleAttribute) as? String
-        return CallState(title: title.flatMap(TeamsUI.meetingTitle), muted: f.mic.flatMap(micState))
+        return CallState(title: title.flatMap(TeamsUI.meetingTitle), muted: f.mic.flatMap(micState), windowOpen: true)
     }
 
     private static func micState(_ button: AXUIElement) -> Bool? {

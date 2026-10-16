@@ -36,6 +36,20 @@ public struct MeetingSettings: Codable, Equatable, Sendable {
     }
 }
 
+/// The title a meeting gets before anything better is known, e.g. "Teams call – Oct 16, 3:05 PM".
+/// The summary's generated title replaces it (but not a Teams meeting name or a user edit).
+public enum MeetingTitle {
+    public static func placeholder(app: String, date: Date) -> String {
+        let df = DateFormatter()
+        df.dateFormat = "MMM d, h:mm a"
+        return "\(app) call – \(df.string(from: date))"
+    }
+
+    public static func isPlaceholder(_ title: String) -> Bool {
+        title.contains(" call – ") || title.hasPrefix("Imported – ")
+    }
+}
+
 /// Parsing what Teams exposes through Accessibility (English UI; anything
 /// unrecognized is reported as unknown).
 public enum TeamsUI {

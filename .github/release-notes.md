@@ -1,9 +1,12 @@
 Private, on-device dictation for Apple Silicon Macs. Hold **Fn**, talk, let go — clean text appears wherever you're typing.
 
-### New in 0.2.0
-- **In-app updates.** Mynah finds and installs new versions itself (Settings › Updates, or Mynah › Check for Updates…). Install 0.2.0 by hand once; after that you won't need to download the DMG again.
-- **Redesigned app:** a sidebar window, a new menu bar panel and an animated recording overlay.
-- **Meeting capture** (off by default, turn it on in Settings › Meetings): Mynah notices when a Microsoft Teams call starts, records the call and your mic as separate tracks, writes a live transcript, and afterwards a summary and to-do list. Other apps: menu bar › **Record a meeting**. Everything stays on your Mac. Needs macOS 14.2 or later.
+### New in 0.2.1
+Meeting capture fixes:
+- **No more "You" lines from other people on speakers.** Call audio your mic picks up through the speakers is removed before transcription, and echoed lines disappear from the live transcript as you go.
+- **Muted in Teams is detected more reliably**, and the live transcript tells you when Mynah can't see Teams' mute button.
+- **Recordings end when the call does.** Mynah now notices when you leave a Teams call instead of recording until you stop it.
+- **Meeting titles describe the call** (e.g. "Q3 budget review with finance") instead of "Teams call" and the date, unless Teams gave the meeting a name or you renamed it.
+- **Readable transcripts:** what the other people say is split into paragraphs at pauses instead of one long block.
 - Builds are ad-hoc signed, so macOS asks for Microphone and Accessibility again after each update.
 
 ### Install

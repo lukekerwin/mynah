@@ -68,7 +68,9 @@ recognition).
 1. A Teams meeting is considered **started** when the Teams desktop app (new Teams,
    `com.microsoft.teams2`, including its helper processes) starts using an audio input device.
 2. A meeting is considered **ended** when Teams has not used audio input for a grace period
-   (default 30 s), so brief device switches and reconnects don't split a meeting.
+   (default 30 s), so brief device switches and reconnects don't split a meeting. It also ends
+   when the Teams call window (read through Accessibility) has closed and the call has been
+   silent for 20 s, since Teams can keep the mic open after you leave.
 3. Setting **When a Teams call starts: Record automatically | Ask me**.
    - *Record automatically*: recording starts and a notification says so.
    - *Ask me*: a notification with Record / Ignore. Ignoring means that call isn't recorded.
