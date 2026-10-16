@@ -10,6 +10,8 @@ final class HotkeyMonitor {
     var onPress: ((Bool) -> Void)?
     var onRelease: (() -> Void)?
     var onEscape: (() -> Void)?
+    /// ⌃⌥M (meeting recording: pause/resume my mic).
+    var onPauseMic: (() -> Void)?
 
     private var monitors: [Any] = []
     private var isDown = false
@@ -27,6 +29,8 @@ final class HotkeyMonitor {
         }
         if let m = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] e in
             if e.keyCode == 53 { self?.onEscape?() }
+            if e.keyCode == 46, e.modifierFlags.contains([.control, .option]),
+               !e.modifierFlags.contains(.command) { self?.onPauseMic?() }
         }) {
             monitors.append(m)
         }

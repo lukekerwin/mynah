@@ -39,8 +39,11 @@ final class StatusBarController {
             button.setAccessibilityLabel("Mynah")
         }
 
-        controller.$phase.map { _ in () }.merge(with: controller.engine.$status.map { _ in () })
-            .receive(on: DispatchQueue.main)
+        var changes = controller.$phase.map { _ in () }.merge(with: controller.engine.$status.map { _ in () }).eraseToAnyPublisher()
+        if let meetings = controller.meetings {
+            changes = changes.merge(with: meetings.$state.map { _ in () }, meetings.$elapsed.map { _ in () }).eraseToAnyPublisher()
+        }
+        changes.receive(on: DispatchQueue.main)
             .sink { [weak self] in self?.refreshIcon() }
             .store(in: &subscriptions)
         refreshIcon()
@@ -99,6 +102,20 @@ final class StatusBarController {
 
     private func refreshIcon() {
         guard let button = item.button, let controller else { return }
+        // A meeting being recorded shows as a red dot and the call timer (dictation wins while it runs).
+        if let meetings = controller.meetings, meetings.isRecording, controller.phase == .idle {
+            button.image = recordingDot
+            button.imagePosition = .imageLeading
+            button.title = " " + meetings.elapsed
+            button.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+            item.length = NSStatusItem.variableLength
+            return
+        }
+        if !button.title.isEmpty {
+            button.title = ""
+            button.imagePosition = .imageOnly
+            item.length = NSStatusItem.squareLength
+        }
         let symbol: String?
         switch controller.phase {
         case .recording: symbol = "record.circle"

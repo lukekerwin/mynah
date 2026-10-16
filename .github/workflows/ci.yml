@@ -23,5 +23,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
+      - name: Swift unit tests
+        working-directory: app
+        run: swift test
       - name: Build Mynah.app
         run: scripts/build_app.sh

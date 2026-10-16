@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import MynahCore
 import SwiftUI
 
 /// Ties hotkey → recorder → engine → paste together.
@@ -22,6 +23,22 @@ final class AppController: ObservableObject {
     let history = HistoryStore()
     let overlay = OverlayController()
     let onboarding = OnboardingWindowController()
+    /// Meetings database (~/Library/Application Support/Mynah/mynah.sqlite); in
+    /// memory with demo data under MYNAH_UI_PREVIEW so previews never touch real meetings.
+    let meetingStore: MeetingStore? = {
+        do {
+            if ProcessInfo.processInfo.environment["MYNAH_UI_PREVIEW"] != nil { return try MeetingStore() }
+            return try MeetingStore(path: SettingsStore.directory.appendingPathComponent("mynah.sqlite").path)
+        } catch {
+            NSLog("Mynah: couldn't open meetings database: \(error)")
+            return nil
+        }
+    }()
+    let probe = MeetingProbe()
+    /// Meeting capture (nil only if the database couldn't be opened).
+    lazy var meetings: MeetingController? = meetingStore.map {
+        MeetingController(store: $0, settings: settings, engine: engine)
+    }
     let mainWindow = MainWindowController()
     private(set) var statusBar: StatusBarController?
 
@@ -42,10 +59,16 @@ final class AppController: ObservableObject {
     private static let minSamples = 16_000 / 4
 
     init() {
+        probe.enginePID = { [weak engine] in engine?.pid }
+        probe.micDeviceUID = { [weak settings] in settings?.data.inputDevice ?? "" }
         recorder.onLevel = { [weak self] level in self?.overlay.model.push(level: level) }
         hotkey.onPress = { [weak self] command in self?.handlePress(command: command) }
         hotkey.onRelease = { [weak self] in self?.handleRelease() }
         hotkey.onEscape = { [weak self] in self?.cancel() }
+        hotkey.onPauseMic = { [weak self] in
+            guard let self, self.settings.data.meetings.pauseMicShortcut else { return }
+            self.meetings?.togglePauseMic()
+        }
         hotkey.hotkey = settings.data.hotkey
 
         settings.$data.map(\.hotkey).removeDuplicates()
@@ -79,6 +102,8 @@ final class AppController: ObservableObject {
             Task { @MainActor in self?.refreshPermissions() }
         }
         startEngine()
+        meetings?.onShowMeetings = { [weak self] id in self?.showMain(.meetings, meeting: id.map { MeetingFocus(meetingID: $0) }) }
+        meetings?.launch(isDictating: { [weak self] in self?.phase != .idle })
         if !settings.data.onboarded {
             showOnboarding()
         } else if !Permissions.accessibilityGranted {
@@ -90,8 +115,8 @@ final class AppController: ObservableObject {
         onboarding.show(controller: self)
     }
 
-    func showMain(_ page: Page = .home) {
-        mainWindow.show(page, controller: self)
+    func showMain(_ page: Page = .home, meeting: MeetingFocus? = nil) {
+        mainWindow.show(page, meeting: meeting, controller: self)
     }
 
     private func updateActivationPolicy(closing: Bool = false) {
@@ -100,15 +125,23 @@ final class AppController: ObservableObject {
         if NSApp.activationPolicy() != policy { NSApp.setActivationPolicy(policy) }
     }
 
-    /// `MYNAH_UI_PREVIEW=home|onboarding|overlay`: open that UI without starting the
-    /// engine or the hotkey, so a development build can run next to the installed app.
+    /// `MYNAH_UI_PREVIEW=home|onboarding|overlay|meetings|meeting|todos|livepanel|…`: open
+    /// that UI without starting the engine or the hotkey, so a development build can run
+    /// next to the installed app. Meeting previews use demo data in an in-memory database.
     private func previewUI(_ mode: String) {
         if let look = ProcessInfo.processInfo.environment["MYNAH_UI_APPEARANCE"] {
             NSApp.appearance = NSAppearance(named: look == "light" ? .aqua : .darkAqua)
         }
+        let demo = meetingStore.map(PreviewData.seed)
+        meetings?.onShowMeetings = { [weak self] id in self?.showMain(.meetings, meeting: id.map { MeetingFocus(meetingID: $0) }) }
         switch mode {
         case "none":
             break
+        case "meeting":
+            showMain(.meetings, meeting: demo.map { MeetingFocus(meetingID: $0.finished) })
+        case "livepanel", "livemeeting":
+            if let demo { meetings?.previewRecording(meetingID: demo.live, title: "Launch sync", script: PreviewData.liveScript) }
+            if mode == "livemeeting" { showMain(.meetings, meeting: demo.map { MeetingFocus(meetingID: $0.live) }) }
         case "statusbar":
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.statusBar?.show() }
         case "onboarding":
@@ -184,6 +217,7 @@ final class AppController: ObservableObject {
                 overlay.flash(error.localizedDescription)
                 return
             }
+            meetings?.setDictating(true)
             pressedAt = Date()
             phase = .recording(command: command, handsFree: false)
             overlay.show(.recording(command: command, handsFree: false))
@@ -209,6 +243,7 @@ final class AppController: ObservableObject {
     private func cancel() {
         guard case .recording = phase else { return }
         _ = recorder.stop()
+        meetings?.setDictating(false)
         phase = .idle
         overlay.hide()
         play("Bottle")
@@ -219,6 +254,7 @@ final class AppController: ObservableObject {
     private func finish() {
         guard case let .recording(command, _) = phase else { return }
         let samples = recorder.stop()
+        meetings?.setDictating(false)
         play("Pop")
         let ctx = focus ?? FocusContext.capture()
         guard samples.count >= Self.minSamples else {

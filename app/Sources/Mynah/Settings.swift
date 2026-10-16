@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import MynahCore
 
 struct Snippet: Codable, Identifiable, Hashable {
     var id = UUID()
@@ -54,6 +55,7 @@ final class SettingsStore: ObservableObject {
         /// the user picks another; empty only on Macs without one (uses the system default).
         var inputDevice = AudioDevices.builtInUID ?? ""
         var onboarded = false
+        var meetings = MeetingSettings()
 
         /// Gemma 4 E4B (~5 GB) + Parakeet (~3.7 GB) is comfortable on 16 GB+ Macs.
         /// Smaller machines get the 0.6B cleanup model and no command mode.
@@ -79,6 +81,7 @@ final class SettingsStore: ObservableObject {
             restoreClipboard = try c.decodeIfPresent(Bool.self, forKey: .restoreClipboard) ?? d.restoreClipboard
             inputDevice = try c.decodeIfPresent(String.self, forKey: .inputDevice) ?? d.inputDevice
             onboarded = try c.decodeIfPresent(Bool.self, forKey: .onboarded) ?? d.onboarded
+            meetings = (try? c.decodeIfPresent(MeetingSettings.self, forKey: .meetings)) ?? d.meetings
         }
     }
 

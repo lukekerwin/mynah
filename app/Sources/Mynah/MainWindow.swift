@@ -2,7 +2,7 @@ import ServiceManagement
 import SwiftUI
 
 enum Page: String, CaseIterable, Identifiable {
-    case home, history, dictionary, snippets, settings, about
+    case home, history, meetings, todos, dictionary, snippets, settings, about
 
     var id: String { rawValue }
 
@@ -10,6 +10,8 @@ enum Page: String, CaseIterable, Identifiable {
         switch self {
         case .home: return "Home"
         case .history: return "History"
+        case .meetings: return "Meetings"
+        case .todos: return "To-dos"
         case .dictionary: return "Dictionary"
         case .snippets: return "Snippets"
         case .settings: return "Settings"
@@ -21,6 +23,8 @@ enum Page: String, CaseIterable, Identifiable {
         switch self {
         case .home: return "waveform"
         case .history: return "clock"
+        case .meetings: return "person.2.wave.2"
+        case .todos: return "checklist"
         case .dictionary: return "character.book.closed"
         case .snippets: return "text.badge.plus"
         case .settings: return "slider.horizontal.3"
@@ -29,12 +33,18 @@ enum Page: String, CaseIterable, Identifiable {
     }
 }
 
+/// Where to land when the window opens: a page, and for Meetings optionally one meeting.
+struct PageRequest {
+    var page: Page
+    var meeting: MeetingFocus?
+}
+
 /// Owns the single app window and lets any part of the app open it on a page.
 @MainActor
 final class MainWindowController {
     private var window: NSWindow?
 
-    func show(_ page: Page, controller: AppController) {
+    func show(_ page: Page, meeting: MeetingFocus? = nil, controller: AppController) {
         if window == nil {
             let view = MainWindow(controller: controller, settings: controller.settings,
                                   engine: controller.engine, history: controller.history)
@@ -48,11 +58,17 @@ final class MainWindowController {
             window.isMovableByWindowBackground = true
             window.isReleasedWhenClosed = false
             window.setContentSize(NSSize(width: 900, height: 620))
-            window.setFrameAutosaveName("MynahMain")
+            // MYNAH_UI_SIZE=WxH: a taller window for screenshots of long pages.
+            if let size = ProcessInfo.processInfo.environment["MYNAH_UI_SIZE"]?.split(separator: "x"), size.count == 2,
+               let w = Double(size[0]), let h = Double(size[1]) {
+                window.setContentSize(NSSize(width: w, height: h))
+            } else {
+                window.setFrameAutosaveName("MynahMain")
+            }
             window.center()
             self.window = window
         }
-        NotificationCenter.default.post(name: .mynahShowPage, object: page)
+        NotificationCenter.default.post(name: .mynahShowPage, object: PageRequest(page: page, meeting: meeting))
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }
@@ -66,10 +82,11 @@ struct MainWindow: View {
     @ObservedObject var engine: EngineClient
     @ObservedObject var history: HistoryStore
     @State private var page: Page = .home
+    @State private var meeting: MeetingFocus?
 
     var body: some View {
         HStack(spacing: 0) {
-            Sidebar(page: $page, engine: engine)
+            Sidebar(page: $page, engine: engine, meetings: controller.meetings)
             Rectangle().fill(Theme.border).frame(width: 1)
             ScrollView {
                 pageView
@@ -85,7 +102,9 @@ struct MainWindow: View {
         .background(Theme.canvas)
         .ignoresSafeArea()
         .onReceive(NotificationCenter.default.publisher(for: .mynahShowPage)) { note in
-            if let p = note.object as? Page { page = p }
+            guard let request = note.object as? PageRequest else { return }
+            page = request.page
+            if request.page == .meetings { meeting = request.meeting }
         }
     }
 
@@ -93,10 +112,37 @@ struct MainWindow: View {
         switch page {
         case .home: HomePage(controller: controller, settings: settings, engine: engine, history: history, page: $page)
         case .history: HistoryPage(history: history)
+        case .meetings:
+            if let meetings = controller.meetings {
+                MeetingsPage(meetings: meetings, settings: settings, focus: $meeting, page: $page)
+            } else {
+                MeetingsUnavailable()
+            }
+        case .todos:
+            if let meetings = controller.meetings {
+                ToDosPage(meetings: meetings) { focus in
+                    meeting = focus
+                    page = .meetings
+                }
+            } else {
+                MeetingsUnavailable()
+            }
         case .dictionary: DictionaryPage(settings: settings)
         case .snippets: SnippetsPage(settings: settings)
         case .settings: SettingsPage(controller: controller, settings: settings, engine: engine)
         case .about: AboutPage()
+        }
+    }
+}
+
+private struct MeetingsUnavailable: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            PageHeader(title: "Meetings")
+            Card {
+                EmptyHint(symbol: "exclamationmark.triangle",
+                          text: "Mynah couldn't open its meetings database. Check the engine log and restart the app.")
+            }
         }
     }
 }
@@ -110,6 +156,7 @@ extension Notification.Name {
 private struct Sidebar: View {
     @Binding var page: Page
     @ObservedObject var engine: EngineClient
+    let meetings: MeetingController?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -123,7 +170,7 @@ private struct Sidebar: View {
 
             VStack(spacing: 2) {
                 ForEach(Page.allCases.filter { $0 != .about }) { item in
-                    SidebarItem(page: item, selected: page == item) { page = item }
+                    SidebarItem(page: item, selected: page == item, meetings: item == .meetings ? meetings : nil) { page = item }
                 }
             }
             .padding(.horizontal, 10)
@@ -145,6 +192,7 @@ private struct Sidebar: View {
 private struct SidebarItem: View {
     var page: Page
     var selected: Bool
+    var meetings: MeetingController?
     var action: () -> Void
     @State private var hover = false
 
@@ -159,6 +207,7 @@ private struct SidebarItem: View {
                     .font(.system(size: 13, weight: selected ? .semibold : .medium))
                     .foregroundStyle(selected ? Theme.ink : Theme.inkSecondary)
                 Spacer()
+                if let meetings { SidebarLive(meetings: meetings) }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
@@ -171,6 +220,15 @@ private struct SidebarItem: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
+    }
+}
+
+/// A red dot next to "Meetings" while a call is being recorded.
+private struct SidebarLive: View {
+    @ObservedObject var meetings: MeetingController
+
+    var body: some View {
+        if meetings.isRecording { LiveDot(color: Theme.coral) }
     }
 }
 
@@ -718,6 +776,8 @@ private struct SettingsPage: View {
                     }
                 }
             }
+
+            MeetingsSettingsCard(settings: settings, engine: engine, meetings: controller.meetings)
 
             Card(title: "Models", subtitle: "Models marked ↓ download on first use (a few GB). Changes apply automatically.") {
                 VStack(spacing: 0) {

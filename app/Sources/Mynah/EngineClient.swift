@@ -1,4 +1,5 @@
 import Foundation
+import MynahCore
 
 struct DownloadInfo: Decodable, Equatable {
     var repo: String
@@ -48,9 +49,32 @@ struct CommandResult: Decodable {
     var llm_ms: Int
 }
 
+struct TranscribeResult: Decodable {
+    struct Piece: Decodable {
+        var start: Double
+        var end: Double
+        var text: String
+    }
+
+    var segments: [Piece]
+    var consumed_s: Double
+    var asr_ms: Int
+}
+
+struct SummaryResult: Decodable {
+    var tldr: String
+    var key_points: [String]
+    var decisions: [String]
+    var open_questions: [String]
+    var action_items: [ExtractedItem]
+    var model: String
+    var llm_ms: Int
+}
+
 struct EngineError: LocalizedError {
     var message: String
     var errorDescription: String? { message }
+    var isCancelled: Bool { message == "cancelled" }
 }
 
 /// Sets up and runs the Python inference engine bundled in Mynah.app.
@@ -103,6 +127,7 @@ final class EngineClient: ObservableObject {
     }
 
     @Published private(set) var status: Status = .stopped
+    var pid: pid_t? { process?.processIdentifier }
     @Published private(set) var health: EngineHealth?
 
     private var setupProcess: Process?
@@ -114,6 +139,12 @@ final class EngineClient: ObservableObject {
     private let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 120
+        return URLSession(configuration: config)
+    }()
+    /// Summaries of long meetings can take minutes.
+    private let longSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 1800
         return URLSession(configuration: config)
     }()
 
@@ -326,6 +357,32 @@ final class EngineClient: ObservableObject {
                        as: CommandResult.self)
     }
 
+    // MARK: meetings
+
+    /// Downloads (first time) and loads the voice detector meetings use.
+    func prepareMeetings() async throws {
+        _ = try await post("/meeting/prepare", body: [:], as: [String: Bool].self)
+    }
+
+    /// Transcribes a window of one meeting track that starts `offset` seconds into the meeting.
+    func transcribe(samples: [Float], offset: Double, vocab: [String], final: Bool) async throws -> TranscribeResult {
+        let audio = await Task.detached(priority: .utility) { Self.encode(samples) }.value
+        return try await post("/transcribe", body: ["audio": audio, "offset_s": offset, "vocab": vocab, "final": final],
+                              as: TranscribeResult.self)
+    }
+
+    func summarize(segments: [[String: Any]], title: String, myName: String?, model: String?, duration: Double,
+                   meetingDate: String, jobID: String) async throws -> SummaryResult {
+        let body: [String: Any] = ["segments": segments, "title": title, "my_name": myName ?? NSNull(),
+                                   "model": model ?? NSNull(), "duration_s": duration,
+                                   "meeting_date": meetingDate, "job_id": jobID]
+        return try await post("/summarize", body: body, as: SummaryResult.self, session: longSession)
+    }
+
+    func cancel(jobID: String) async {
+        _ = try? await post("/cancel", body: ["job_id": jobID], as: [String: Bool].self)
+    }
+
     // MARK: helpers
 
     private static func freePort() -> Int {
@@ -365,7 +422,7 @@ final class EngineClient: ObservableObject {
         logHandle()?.write(Data(text.utf8))
     }
 
-    private static func encode(_ samples: [Float]) -> String {
+    nonisolated private static func encode(_ samples: [Float]) -> String {
         var pcm = [Int16](repeating: 0, count: samples.count)
         for (i, s) in samples.enumerated() {
             pcm[i] = Int16(max(-1, min(1, s)) * 32767).littleEndian
@@ -384,12 +441,13 @@ final class EngineClient: ObservableObject {
         return try decode(data, response)
     }
 
-    private func post<T: Decodable>(_ path: String, body: [String: Any], as: T.Type) async throws -> T {
+    private func post<T: Decodable>(_ path: String, body: [String: Any], as: T.Type,
+                                    session: URLSession? = nil) async throws -> T {
         var req = request(path)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await session.data(for: req)
+        let (data, response) = try await (session ?? self.session).data(for: req)
         return try decode(data, response)
     }
 

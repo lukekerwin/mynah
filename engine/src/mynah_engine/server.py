@@ -11,6 +11,20 @@ MYNAH_ENGINE_TOKEN, so web pages and other users can't drive it.
     GET  /health   -> {"ready", "loading", "error", "asr", "llm", "command_llm"}
     GET  /models   -> available models, which are downloaded, defaults
 
+Meetings (see meeting.py / summarize.py):
+    POST /meeting/prepare  {} -> {"ok"}   (downloads + loads the voice detector)
+    POST /transcribe {"audio": ..., "offset_s": float, "vocab": [...], "final": bool}
+        -> {"segments": [{"start", "end", "text"}], "consumed_s", "asr_ms"}
+    POST /summarize  {"segments": [{"track", "start", "end", "text"}], "title", "my_name",
+                      "model": key | null, "duration_s", "meeting_date", "job_id"}
+        -> {"tldr", "key_points", "decisions", "open_questions",
+            "action_items": [{"text", "owner", "due", "time_s"}], "model", "llm_ms"}
+        409 {"error": "cancelled"} if cancelled
+    POST /cancel     {"job_id"} -> {"cancelled": bool}
+
+Dictation and commands always run before queued meeting work, and a running
+summary pauses between tokens to let them through (worker.py).
+
 context = {"app": "Slack", "title": "<window title>", "vocab": [...],
            "snippets": [{"trigger", "text"}], "cleanup": true}
 """
@@ -22,7 +36,6 @@ import os
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
@@ -31,9 +44,12 @@ from .asr import SAMPLE_RATE, Asr
 from . import downloads
 from .cleanup import Llm
 from .downloads import ensure_downloaded
+from .meeting import MeetingTranscriber
 from .models import ASR_MODELS, DEFAULT_ASR, DEFAULT_COMMAND_LLM, DEFAULT_LLM, LLM_MODELS
 from .prompts import basic_cleanup, is_filler_only
+from .summarize import Summarizer
 from .vocab import apply_vocab
+from .worker import BACKGROUND, NORMAL, URGENT, Cancelled, PriorityWorker
 
 log = logging.getLogger("mynah_engine")
 
@@ -45,20 +61,22 @@ class Engine:
     """Owns the loaded models.
 
     MLX binds GPU streams to the thread that created them, so every model load
-    and inference call runs on one dedicated worker thread (which also
-    serializes requests).
+    and inference call runs on one dedicated worker thread, in priority order
+    (see worker.py).
     """
 
     def __init__(self):
-        self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx")
+        self.worker = PriorityWorker()
+        self.meetings = MeetingTranscriber()
+        self.summarizer = Summarizer(self)
         self.asr: Asr | None = None
         self.llm: Llm | None = None
         self.command_llm: Llm | None = None
         self.loading = False
         self.error: str | None = None
 
-    def run(self, fn, *args):
-        return self.worker.submit(fn, *args).result()
+    def run(self, fn, *args, priority: int = URGENT, job_id: str | None = None, inline_ok: bool = False):
+        return self.worker.run(fn, *args, priority=priority, job_id=job_id, inline_ok=inline_ok)
 
     # -- model management -------------------------------------------------
     def configure(self, asr: str, llm: str | None, command_llm: str | None) -> None:
@@ -68,7 +86,7 @@ class Engine:
             if key is not None and key not in table:
                 raise ValueError(f"unknown {kind} model: {key}")
         self.loading, self.error = True, None
-        self.worker.submit(self._load, asr, llm, command_llm)
+        self.worker.submit(self._load, asr, llm, command_llm, priority=URGENT)
 
     def _load(self, asr: str, llm: str | None, command_llm: str | None) -> None:
         try:
@@ -157,6 +175,20 @@ class Engine:
         log.info("command app=%s instruction=%r -> %d chars", app, instruction, len(text))
         return {"instruction": instruction, "text": text, "asr_ms": round(asr_ms), "llm_ms": round(llm_ms)}
 
+    def transcribe_window(self, audio: np.ndarray, offset_s: float, vocab: list[str], final: bool) -> dict:
+        if not self.asr:
+            raise RuntimeError("models not loaded yet")
+        vocab = [v for v in vocab if v.strip()]
+        out = self.meetings.transcribe(self.asr, audio, offset_s, vocab, final)
+        log.info("transcribe offset=%.1fs len=%.1fs final=%s -> %d segments, consumed %.1fs, %dms",
+                 offset_s, len(audio) / SAMPLE_RATE, final, len(out["segments"]), out["consumed_s"], out["asr_ms"])
+        return out
+
+    def summarize(self, body: dict) -> dict:
+        return self.summarizer.summarize(body.get("segments", []), body.get("title") or "Call",
+                                         body.get("my_name") or None, body.get("model") or None,
+                                         float(body.get("duration_s") or 0), body.get("meeting_date") or None)
+
 
 def describe_app(ctx: dict) -> str:
     app = ctx.get("app") or "Unknown"
@@ -236,15 +268,30 @@ def make_handler(engine: Engine, token: str):
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
                 if self.path == "/dictate":
                     self._send(200, engine.run(engine.dictate, decode_audio(body["audio"]),
-                                               body.get("context", {})))
+                                               body.get("context", {}), inline_ok=True))
                 elif self.path == "/command":
                     self._send(200, engine.run(engine.command, decode_audio(body["audio"]),
-                                               body.get("selection", ""), body.get("context", {})))
+                                               body.get("selection", ""), body.get("context", {}), inline_ok=True))
+                elif self.path == "/transcribe":
+                    self._send(200, engine.run(engine.transcribe_window, decode_audio(body["audio"]),
+                                               float(body.get("offset_s", 0)), body.get("vocab", []),
+                                               bool(body.get("final", False)), priority=NORMAL))
+                elif self.path == "/meeting/prepare":
+                    engine.run(engine.meetings.prepare, priority=NORMAL)
+                    self._send(200, {"ok": True})
+                elif self.path == "/summarize":
+                    self._send(200, engine.run(engine.summarize, body, priority=BACKGROUND,
+                                               job_id=body.get("job_id")))
+                elif self.path == "/cancel":
+                    self._send(200, {"cancelled": engine.worker.cancel(str(body.get("job_id", "")))})
                 elif self.path == "/config":
                     engine.configure(body["asr"], body.get("llm"), body.get("command_llm"))
                     self._send(202, {"ok": True})
                 else:
                     self._send(404, {"error": "not found"})
+            except Cancelled:
+                log.info("%s cancelled", self.path)
+                self._send(409, {"error": "cancelled"})
             except Exception as e:
                 log.exception("request failed")
                 self._send(500, {"error": str(e)})

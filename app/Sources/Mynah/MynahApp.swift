@@ -103,6 +103,11 @@ struct MenuPanel: View {
                     .tint(Theme.teal).padding(.horizontal, 16).padding(.bottom, 12)
             }
 
+            if let meetings = controller.meetings {
+                Rectangle().fill(Theme.border).frame(height: 1)
+                MenuMeetingSection(meetings: meetings, settings: settings, open: open, dismiss: dismiss)
+            }
+
             Rectangle().fill(Theme.border).frame(height: 1)
 
             if history.recent.isEmpty {
@@ -131,6 +136,7 @@ struct MenuPanel: View {
                 if case .failed = engine.status {
                     MenuAction(symbol: "arrow.clockwise", title: "Restart engine") { controller.startEngine() }
                 }
+                if MeetingProbe.enabled { debugActions }
                 MenuAction(symbol: "power", title: "Quit Mynah") { NSApp.terminate(nil) }
             }
             .padding(.vertical, 6)
@@ -165,6 +171,30 @@ struct MenuPanel: View {
         }
     }
 
+    /// Phase-0 probe tools, only with `defaults write com.lukekerwin.mynah MynahMeetingProbe -bool YES`.
+    @ViewBuilder private var debugActions: some View {
+        let probe = controller.probe
+        MenuAction(symbol: "ladybug", title: probe.logging ? "Stop logging audio processes" : "Log audio processes") {
+            probe.toggleLogging()
+        }
+        MenuAction(symbol: "ladybug", title: probe.recording ? "Stop recording Teams + mic" : "Record Teams + mic") {
+            probe.toggleRecording()
+        }
+        MenuAction(symbol: "ladybug", title: "Import probe recording as meeting…") {
+            dismiss()
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop")
+            NSApp.activate(ignoringOtherApps: true)
+            if panel.runModal() == .OK, let url = panel.url { controller.meetings?.importProbe(url) }
+        }
+        MenuAction(symbol: "ladybug", title: "Open meetings log") {
+            if !FileManager.default.fileExists(atPath: MeetingProbe.logURL.path) { probe.write("log opened") }
+            NSWorkspace.shared.open(MeetingProbe.logURL)
+        }
+    }
+
     private func open(_ page: Page) {
         controller.showMain(page)
         dismiss()
@@ -175,31 +205,120 @@ struct MenuPanel: View {
     }
 }
 
+/// What the call recorder is doing, with the controls that matter right now.
+private struct MenuMeetingSection: View {
+    @ObservedObject var meetings: MeetingController
+    @ObservedObject var settings: SettingsStore
+    var open: (Page) -> Void
+    var dismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            switch meetings.state {
+            case let .recording(r):
+                recording(r)
+            case .asking:
+                MenuAction(symbol: "phone.fill", tint: Theme.amber, title: "Teams call in progress",
+                           detail: "Record and transcribe it on this Mac?") {
+                    meetings.recordAskedCall()
+                }
+            case .idle:
+                Menu {
+                    ForEach(meetings.audioApps()) { app in
+                        Button(app.name) { meetings.startManual(app); dismiss() }
+                    }
+                } label: {
+                    MenuActionLabel(symbol: "record.circle", title: "Record a meeting",
+                                    detail: "Pick the app that's playing the call.", trailing: "chevron.right")
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+            default:
+                EmptyView()
+            }
+            if settings.data.meetings.enabled || hasMeetings {
+                MenuAction(symbol: "person.2.wave.2", title: "Meetings") { open(.meetings) }
+                MenuAction(symbol: "checklist", title: "To-dos") { open(.todos) }
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var hasMeetings: Bool { (try? meetings.store.allMeetings().isEmpty) == false }
+
+    private func recording(_ r: MeetingController.Recording) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                LiveDot(color: Theme.coral).padding(.top, 3)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("Recording").font(Theme.body.weight(.semibold)).foregroundStyle(Theme.ink)
+                        Text(meetings.elapsed).font(Theme.caption.monospacedDigit()).foregroundStyle(Theme.inkSecondary)
+                    }
+                    Text(r.title).font(Theme.caption).foregroundStyle(Theme.inkSecondary).lineLimit(1)
+                    if let note = statusNote(r) {
+                        Text(note).font(Theme.caption).foregroundStyle(Theme.amber)
+                    }
+                }
+            }
+            HStack(spacing: 8) {
+                Button(r.paused ? "Resume mic" : "Pause mic") { meetings.togglePauseMic() }.buttonStyle(.quiet)
+                Button("Stop") { meetings.stop(discard: false); dismiss() }.buttonStyle(.quiet)
+                Button("Open") { meetings.showMeetings(focus: r.meetingID); dismiss() }.buttonStyle(.quiet)
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 8)
+    }
+
+    private func statusNote(_ r: MeetingController.Recording) -> String? {
+        if meetings.permissionProblem { return "Can't hear the call: allow System Audio Recording." }
+        if r.paused { return "Your mic is paused." }
+        if meetings.teamsMuted == true, settings.data.meetings.teamsMuteDetection { return "Muted in Teams, not recording you." }
+        return nil
+    }
+}
+
 private struct MenuAction: View {
     var symbol: String
     var tint: Color = Theme.inkSecondary
     var title: String
     var detail: String?
     var action: () -> Void
-    @State private var hover = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: symbol).font(.system(size: 12, weight: .medium)).foregroundStyle(tint).frame(width: 16)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title).font(Theme.body.weight(.medium)).foregroundStyle(Theme.ink)
-                    if let detail { Text(detail).font(Theme.caption).foregroundStyle(Theme.inkSecondary) }
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 12).padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hover ? Theme.card : .clear))
-            .padding(.horizontal, 6)
-            .contentShape(Rectangle())
+            MenuActionLabel(symbol: symbol, tint: tint, title: title, detail: detail)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
+    }
+}
+
+private struct MenuActionLabel: View {
+    var symbol: String
+    var tint: Color = Theme.inkSecondary
+    var title: String
+    var detail: String?
+    var trailing: String?
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol).font(.system(size: 12, weight: .medium)).foregroundStyle(tint).frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(Theme.body.weight(.medium)).foregroundStyle(Theme.ink)
+                if let detail { Text(detail).font(Theme.caption).foregroundStyle(Theme.inkSecondary) }
+            }
+            Spacer()
+            if let trailing {
+                Image(systemName: trailing).font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.inkTertiary)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hover ? Theme.card : .clear))
+        .padding(.horizontal, 6)
+        .contentShape(Rectangle())
         .onHover { hover = $0 }
     }
 }
@@ -233,3 +352,12 @@ private struct MenuTranscript: View {
         .onHover { hover = $0 }
     }
 }
+
+/// Red (non-template, so the menu bar keeps its colour) recording dot.
+let recordingDot: NSImage = {
+    let config = NSImage.SymbolConfiguration(paletteColors: [.systemRed])
+    let image = NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "Recording meeting")?
+        .withSymbolConfiguration(config) ?? NSImage()
+    image.isTemplate = false
+    return image
+}()
