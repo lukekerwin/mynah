@@ -1,6 +1,6 @@
 import pytest
 
-from mynah_engine.summarize import fmt_time, format_transcript, normalize, parse_json, parse_time, split_sections
+from mynah_engine.summarize import clean_title, fmt_time, format_transcript, normalize, parse_json, parse_time, split_sections
 
 
 def test_format_transcript_merges_and_orders():
@@ -60,6 +60,7 @@ def test_normalize_coerces_shapes():
         ],
     }, duration_s=600)
     assert out["tldr"] == "Short call. About the deck."
+    assert out["title"] is None
     assert out["key_points"] == ["deck"]
     assert out["decisions"] == [] and out["open_questions"] == []
     assert out["action_items"] == [
@@ -69,3 +70,11 @@ def test_normalize_coerces_shapes():
         {"text": "Follow up", "owner": "unassigned", "due": None, "time_s": 0.0},
         {"text": "Stamp copied", "owner": "me", "due": None, "time_s": 65.0},
     ]
+
+
+def test_clean_title():
+    assert clean_title('  "Title: Q3 budget review with finance."  ') == "Q3 budget review with finance"
+    assert clean_title("“Hiring plan”") == "Hiring plan"
+    assert clean_title("") is None and clean_title(None) is None and clean_title(["x"]) is None
+    long = clean_title("word " * 40)
+    assert len(long) <= 80 and not long.endswith(" ")

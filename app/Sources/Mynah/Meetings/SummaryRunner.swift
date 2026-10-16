@@ -103,6 +103,11 @@ final class SummaryRunner: ObservableObject {
                                                      keyPoints: result.key_points, decisions: result.decisions,
                                                      openQuestions: result.open_questions),
                                       items: result.action_items)
+                if let title = result.title, !title.isEmpty {
+                    _ = try store.modifyMeeting(id: meeting.id) {
+                        if !$0.titleEdited, MeetingTitle.isPlaceholder($0.title) { $0.title = title }
+                    }
+                }
                 try store.setStatus(meeting.id, .done)
                 log.notice("summarized \(meeting.id, privacy: .public) in \(result.llm_ms) ms")
                 onFinished?(meeting, true)

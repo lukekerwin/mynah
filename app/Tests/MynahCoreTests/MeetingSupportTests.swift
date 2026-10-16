@@ -74,3 +74,14 @@ struct SummaryEligibilityTests {
         #expect(SummaryEligibility.shouldInterrupt(C(engineReady: true, recording: false, dictating: false, thermalState: 2)))
     }
 }
+
+struct MeetingTitleTests {
+    @Test func placeholderIsRecognized() {
+        let t = MeetingTitle.placeholder(app: "Teams", date: Date())
+        #expect(t.hasPrefix("Teams call – "))
+        #expect(MeetingTitle.isPlaceholder(t))
+        #expect(MeetingTitle.isPlaceholder("Imported – probe"))
+        #expect(!MeetingTitle.isPlaceholder("Weekly sync"))
+        #expect(!MeetingTitle.isPlaceholder("Call with Priya"))
+    }
+}

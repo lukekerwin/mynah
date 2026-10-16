@@ -17,7 +17,7 @@ Meetings (see meeting.py / summarize.py):
         -> {"segments": [{"start", "end", "text"}], "consumed_s", "asr_ms"}
     POST /summarize  {"segments": [{"track", "start", "end", "text"}], "title", "my_name",
                       "model": key | null, "duration_s", "meeting_date", "job_id"}
-        -> {"tldr", "key_points", "decisions", "open_questions",
+        -> {"title", "tldr", "key_points", "decisions", "open_questions",
             "action_items": [{"text", "owner", "due", "time_s"}], "model", "llm_ms"}
         409 {"error": "cancelled"} if cancelled
     POST /cancel     {"job_id"} -> {"cancelled": bool}

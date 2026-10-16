@@ -22,6 +22,7 @@ SYSTEM = """You write notes for a recorded call. The transcript lines look like 
 
 Return ONLY a JSON object with exactly these keys:
 {
+  "title": "short title naming what the call was about, 3-8 words, no date",
   "tldr": "2-3 sentence summary of the call",
   "key_points": ["main topics or facts discussed"],
   "decisions": ["things that were agreed or decided"],
@@ -36,12 +37,13 @@ Rules:
 - Include every commitment or task, whoever owns it.
 - owner is "me" when You commits to something, or when Others ask You to do something and You agree. Use a person's name only if it is said in the call; otherwise "unassigned".
 - Only give a due date if a specific date or day is stated; resolve relative days ("Friday") against the meeting date when it is given, else null.
+- The title names the main topic (e.g. "Q3 budget review with finance"), not the app or the date.
 - Use only what is in the transcript. Do not invent names, numbers or tasks. Empty lists are fine.
 - Write in the language of the transcript. Output the JSON object only, with no code fences or commentary."""
 
-MERGE_SYSTEM = """You merge partial notes for different sections of the same call into one set of notes. Each input is a JSON object with keys tldr, key_points, decisions, open_questions, action_items.
+MERGE_SYSTEM = """You merge partial notes for different sections of the same call into one set of notes. Each input is a JSON object with keys title, tldr, key_points, decisions, open_questions, action_items.
 
-Return ONLY one JSON object with the same keys: a single tldr for the whole call (2-3 sentences), and the other lists combined with duplicates removed (keep the earliest time of duplicate action items). Do not invent anything. Output the JSON object only."""
+Return ONLY one JSON object with the same keys: a single title (3-8 words, the main topic of the whole call) and tldr (2-3 sentences) for the whole call, and the other lists combined with duplicates removed (keep the earliest time of duplicate action items). Do not invent anything. Output the JSON object only."""
 
 
 # -- pure helpers ---------------------------------------------------------
@@ -151,12 +153,24 @@ def normalize(d: dict, duration_s: float) -> dict:
         items.append({"text": text, "owner": owner, "due": due, "time_s": t})
     tldr = d.get("tldr")
     return {
+        "title": clean_title(d.get("title")),
         "tldr": tldr.strip() if isinstance(tldr, str) else " ".join(_strings(tldr)),
         "key_points": _strings(d.get("key_points")),
         "decisions": _strings(d.get("decisions")),
         "open_questions": _strings(d.get("open_questions")),
         "action_items": items,
     }
+
+
+def clean_title(value) -> str | None:
+    """A one-line title: no quotes, trailing period or label, at most 80 characters."""
+    if not isinstance(value, str):
+        return None
+    t = " ".join(value.split()).strip().strip('"\'“”‘’').strip()
+    t = re.sub(r"^(title|meeting title)\s*:\s*", "", t, flags=re.I).rstrip(".").strip()
+    if len(t) > 80:
+        t = t[:80].rsplit(" ", 1)[0].rstrip(",;:-–")
+    return t or None
 
 
 # -- model side -----------------------------------------------------------

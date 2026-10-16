@@ -62,6 +62,7 @@ struct TranscribeResult: Decodable {
 }
 
 struct SummaryResult: Decodable {
+    var title: String?  // older engines don't send one
     var tldr: String
     var key_points: [String]
     var decisions: [String]
