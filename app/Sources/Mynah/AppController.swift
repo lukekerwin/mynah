@@ -110,7 +110,7 @@ final class AppController: ObservableObject {
                 return
             }
             do {
-                try recorder.start()
+                try recorder.start(deviceUID: settings.data.inputDevice)
             } catch {
                 overlay.flash(error.localizedDescription)
                 return

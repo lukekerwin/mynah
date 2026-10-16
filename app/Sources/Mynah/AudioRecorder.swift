@@ -1,4 +1,5 @@
 import Accelerate
+import AudioToolbox
 import AVFoundation
 
 enum RecorderError: LocalizedError {
@@ -7,12 +8,16 @@ enum RecorderError: LocalizedError {
     var errorDescription: String? { "No microphone available" }
 }
 
-/// Captures the default input device and resamples to 16 kHz mono Float32.
+/// Captures from the chosen input device and resamples to 16 kHz mono Float32.
+///
+/// A fresh engine is built per recording and released afterwards: an idle `AVAudioEngine`
+/// keeps its input unit attached to the device, which holds Bluetooth headsets in
+/// low-quality hands-free mode even between dictations.
 final class AudioRecorder {
     /// RMS level of each captured chunk, delivered on the main queue.
     var onLevel: ((Float) -> Void)?
 
-    private let engine = AVAudioEngine()
+    private var engine: AVAudioEngine?
     private var converter: AVAudioConverter?
     private var samples: [Float] = []
     private let lock = NSLock()
@@ -20,12 +25,18 @@ final class AudioRecorder {
 
     private(set) var isRecording = false
 
-    func start() throws {
+    /// - Parameter deviceUID: Core Audio UID of the mic to use (see `AudioDevices.resolve`).
+    func start(deviceUID: String) throws {
         lock.lock()
         samples.removeAll(keepingCapacity: true)
         lock.unlock()
 
+        let engine = AVAudioEngine()
         let input = engine.inputNode
+        if var device = AudioDevices.resolve(uid: deviceUID), let unit = input.audioUnit {
+            AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
+                                 &device, UInt32(MemoryLayout<AudioDeviceID>.size))
+        }
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { throw RecorderError.noInputDevice }
         converter = AVAudioConverter(from: format, to: target)
@@ -40,14 +51,17 @@ final class AudioRecorder {
             input.removeTap(onBus: 0)
             throw error
         }
+        self.engine = engine
         isRecording = true
     }
 
     /// Stops capture and returns everything recorded since `start()`.
     func stop() -> [Float] {
-        guard isRecording else { return [] }
+        guard isRecording, let engine else { return [] }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        self.engine = nil
+        converter = nil
         isRecording = false
         lock.lock()
         defer { lock.unlock() }
