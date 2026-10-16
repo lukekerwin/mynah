@@ -6,15 +6,17 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 A="$ROOT/assets"; TMP="$(mktemp -d)"
 render() { swift "$ROOT/scripts/render_svg.swift" "$@"; }
 
-# App icon: Quick Look (WebKit) renders the drop shadow; AppKit doesn't.
-qlmanage -t -s 1024 -o "$TMP" "$A/logo.svg" >/dev/null 2>&1
+# App icon: WebKit renders the SVG drop shadow (AppKit doesn't) onto a transparent
+# background (Quick Look paints white corners). Output is 2x on Retina, so downscale.
+swift "$ROOT/scripts/render_icon.swift" "$A/logo.svg" "$TMP/logo-raw.png" 1024
+sips -z 1024 1024 "$TMP/logo-raw.png" --out "$TMP/logo.png" >/dev/null
 SET="$TMP/AppIcon.iconset"; mkdir -p "$SET"
 for s in 16 32 128 256 512; do
-  sips -z $s $s "$TMP/logo.svg.png" --out "$SET/icon_${s}x${s}.png" >/dev/null
-  sips -z $((s*2)) $((s*2)) "$TMP/logo.svg.png" --out "$SET/icon_${s}x${s}@2x.png" >/dev/null
+  sips -z $s $s "$TMP/logo.png" --out "$SET/icon_${s}x${s}.png" >/dev/null
+  sips -z $((s*2)) $((s*2)) "$TMP/logo.png" --out "$SET/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns "$SET" -o "$A/AppIcon.icns"
-sips -z 256 256 "$TMP/logo.svg.png" --out "$A/logo-256.png" >/dev/null
+sips -z 256 256 "$TMP/logo.png" --out "$A/logo-256.png" >/dev/null
 
 # Menu-bar template icon (18pt tall).
 render "$A/menubar.svg" "$A/MenuBarIcon.png" 21 18

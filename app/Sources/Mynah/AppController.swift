@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import SwiftUI
 
 /// Ties hotkey → recorder → engine → paste together.
 ///
@@ -21,6 +22,8 @@ final class AppController: ObservableObject {
     let history = HistoryStore()
     let overlay = OverlayController()
     let onboarding = OnboardingWindowController()
+    let mainWindow = MainWindowController()
+    private(set) var statusBar: StatusBarController?
 
     static let repoURL = URL(string: "https://github.com/lukekerwin/mynah")!
 
@@ -57,6 +60,19 @@ final class AppController: ObservableObject {
     // MARK: lifecycle
 
     func launch() {
+        statusBar = StatusBarController(controller: self)
+        // Show a Dock icon while any window is open, so the app can be found,
+        // reopened, or force-quit like a normal app; hide it again after.
+        NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.updateActivationPolicy() }
+        }
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.updateActivationPolicy(closing: true) }
+        }
+        if let mode = ProcessInfo.processInfo.environment["MYNAH_UI_PREVIEW"] {
+            previewUI(mode)
+            return
+        }
         Task { microphoneOK = await Permissions.requestMicrophone() }
         hotkey.start()
         permissionTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
@@ -72,6 +88,59 @@ final class AppController: ObservableObject {
 
     func showOnboarding() {
         onboarding.show(controller: self)
+    }
+
+    func showMain(_ page: Page = .home) {
+        mainWindow.show(page, controller: self)
+    }
+
+    private func updateActivationPolicy(closing: Bool = false) {
+        let open = NSApp.windows.filter { $0.isVisible && $0.styleMask.contains(.titled) }.count - (closing ? 1 : 0)
+        let policy: NSApplication.ActivationPolicy = open > 0 ? .regular : .accessory
+        if NSApp.activationPolicy() != policy { NSApp.setActivationPolicy(policy) }
+    }
+
+    /// `MYNAH_UI_PREVIEW=home|onboarding|overlay`: open that UI without starting the
+    /// engine or the hotkey, so a development build can run next to the installed app.
+    private func previewUI(_ mode: String) {
+        if let look = ProcessInfo.processInfo.environment["MYNAH_UI_APPEARANCE"] {
+            NSApp.appearance = NSAppearance(named: look == "light" ? .aqua : .darkAqua)
+        }
+        switch mode {
+        case "none":
+            break
+        case "statusbar":
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.statusBar?.show() }
+        case "onboarding":
+            showOnboarding()
+        case "overlay":
+            overlay.show(.recording(command: false, handsFree: true))
+            Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.overlay.model.push(level: Float.random(in: 0.0008...0.06)) }
+            }
+        case "menu":
+            let panel = MenuPanel(controller: self, settings: settings, engine: engine, history: history)
+            let window = NSWindow(contentViewController: NSHostingController(rootView: panel))
+            window.styleMask = [.borderless]
+            window.isReleasedWhenClosed = false
+            window.center()
+            window.makeKeyAndOrderFront(nil)
+        default:
+            showMain(Page(rawValue: mode) ?? .home)
+        }
+        // MYNAH_UI_SHOT=/dir: write a PNG of every visible window there, then quit.
+        if let dir = ProcessInfo.processInfo.environment["MYNAH_UI_SHOT"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                for (i, window) in NSApp.windows.enumerated() where window.isVisible {
+                    guard let view = window.contentView,
+                          let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+                    view.cacheDisplay(in: view.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?
+                        .write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(mode)-\(i).png"))
+                }
+                NSApp.terminate(nil)
+            }
+        }
     }
 
     func shutdown() {
