@@ -11,5 +11,5 @@ rm -f "$DMG"
 UV="${UV_BIN:-$ROOT/build/.uv-0.13.1/uv}"
 "$UV" tool run --from "dmgbuild==1.6.7" dmgbuild -s "$ROOT/scripts/dmg_settings.py" \
     -D app="$APP" -D bg="$ROOT/assets/dmg-background.tiff" "Mynah $VERSION" "$DMG"
-shasum -a 256 "$DMG" | tee "$DMG.sha256"
+(cd "$ROOT/dist" && shasum -a 256 "$(basename "$DMG")" | tee "$(basename "$DMG").sha256")
 echo "Built $DMG ($(du -h "$DMG" | cut -f1))"
