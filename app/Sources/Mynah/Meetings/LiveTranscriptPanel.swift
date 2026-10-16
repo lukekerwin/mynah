@@ -271,6 +271,7 @@ struct LiveTranscriptView: View {
         if meetings.permissionProblem { return "can't hear the call" }
         if r.paused { return "mic paused" }
         if meetings.teamsMuted == true, settings.data.meetings.teamsMuteDetection { return "muted in Teams" }
+        if meetings.teamsMuteUnreadable { return "can't see Teams mute" }
         return nil
     }
 

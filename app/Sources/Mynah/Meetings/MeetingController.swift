@@ -63,6 +63,7 @@ final class MeetingController: ObservableObject {
     private var axTimer: Timer?
     private var silenceTimer: Timer?
     private var teamsOutputSince: Date?
+    private var readingTeams = false
     private var sweepTimer: Timer?
     private var preparedGeneration = false
     private var subscriptions = Set<AnyCancellable>()
@@ -93,6 +94,14 @@ final class MeetingController: ObservableObject {
     }
 
     var enabled: Bool { settings.data.meetings.enabled }
+
+    /// Recording a Teams call with mute detection on, but its mic button can't be read
+    /// (no Accessibility permission, or the call window isn't found).
+    var teamsMuteUnreadable: Bool {
+        guard let r = recording, r.app.bundlePrefix == MeetingDetector.teamsPrefix,
+              settings.data.meetings.teamsMuteDetection else { return false }
+        return teamsMuted == nil && Date().timeIntervalSince(r.since) > 15
+    }
 
     // MARK: lifecycle
 
@@ -368,8 +377,12 @@ final class MeetingController: ObservableObject {
                 try? await Task.sleep(nanoseconds: 8_000_000_000)
                 guard let self, !Task.isCancelled, #available(macOS 14.2, *),
                       let session = self.session as? MeetingSession, session.meetingID == meetingID else { return }
-                await self.processor.transcribe(meetingID: meetingID, track: track,
-                                                available: session.samplesWritten(track), final: false)
+                // The mic window can't run ahead of the call audio BleedGate compares it with.
+                let available = track == .you ? min(session.samplesWritten(.you), session.samplesWritten(.others))
+                    : session.samplesWritten(track)
+                if await self.processor.transcribe(meetingID: meetingID, track: track, available: available, final: false) {
+                    try? self.processor.hideEcho(meetingID: meetingID)
+                }
                 track = track == .others ? .you : .others
             }
         }
@@ -420,17 +433,24 @@ final class MeetingController: ObservableObject {
 
     /// Meeting title and mute state from the Teams call window (best effort).
     private func readTeamsWindow() {
-        guard let r = recording else { return }
+        guard let r = recording, !readingTeams else { return }
+        readingTeams = true
         Task.detached(priority: .utility) {
             let call = TeamsAccessibility.read()
-            await MainActor.run { self.applyTeamsWindow(call, meetingID: r.meetingID) }
+            await MainActor.run {
+                self.readingTeams = false
+                self.applyTeamsWindow(call, meetingID: r.meetingID)
+            }
         }
     }
 
     private func applyTeamsWindow(_ call: TeamsAccessibility.CallState, meetingID: String) {
         guard var r = recording, r.meetingID == meetingID else { return }
         let muted = settings.data.meetings.teamsMuteDetection ? (call.muted ?? false) : false
-        if teamsMuted != call.muted { teamsMuted = call.muted }
+        if teamsMuted != call.muted {
+            log.notice("Teams mute state: \(call.muted.map { $0 ? "muted" : "live" } ?? "unknown", privacy: .public)")
+            teamsMuted = call.muted
+        }
         if #available(macOS 14.2, *) { (session as? MeetingSession)?.setGate { $0.teamsMuted = muted } }
         if let title = call.title, title != r.title,
            let m = try? store.meeting(id: meetingID), !m.titleEdited {

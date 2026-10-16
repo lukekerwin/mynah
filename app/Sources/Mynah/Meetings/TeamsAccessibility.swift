@@ -6,45 +6,80 @@ import MynahCore
 /// title and whether the user is muted. Verified on new Teams (2026-10, English
 /// UI): the call toolbar's mic button is "Unmute mic" while muted and "Mute mic"
 /// while live; the call window is titled "<meeting> | Microsoft Teams".
+///
+/// A big meeting's tree (video tiles, chat) is large, so the call window and its
+/// mic button are found once and then re-read directly; the search only runs
+/// again when they go away.
 enum TeamsAccessibility {
     struct CallState {
         var title: String?
         var muted: Bool?
     }
 
+    private struct Found {
+        var pid: pid_t
+        var window: AXUIElement
+        var mic: AXUIElement?
+        var at: Date
+    }
+
+    private static let lock = NSLock()
+    private static var found: Found?
+    /// A call window without a recognizable mic button is searched again after this.
+    private static let researchAfter: TimeInterval = 10
+
     static func read() -> CallState {
         guard Permissions.accessibilityGranted,
               let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == MeetingDetector.teamsPrefix })
         else { return CallState() }
-        let element = AXUIElementCreateApplication(app.processIdentifier)
-        // Teams' web content only exposes its tree when asked.
-        AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-
-        var state = CallState()
-        for window in AXDump.children(element, kAXWindowsAttribute) {
-            var buttons: [String] = []
-            var budget = 2_000
-            collectButtons(window, depth: 0, budget: &budget, into: &buttons)
-            // The call window is the one with a "Leave" button.
-            guard buttons.contains(where: { $0.lowercased().hasPrefix("leave") }) else { continue }
-            if let title = AXDump.attr(window, kAXTitleAttribute) as? String {
-                state.title = TeamsUI.meetingTitle(windowTitle: title)
+        lock.lock()
+        defer { lock.unlock() }
+        if let f = found, f.pid == app.processIdentifier,
+           let title = AXDump.attr(f.window, kAXTitleAttribute) as? String {
+            let muted = f.mic.flatMap(micState)
+            if muted != nil || Date().timeIntervalSince(f.at) < researchAfter {
+                return CallState(title: TeamsUI.meetingTitle(windowTitle: title), muted: muted)
             }
-            state.muted = TeamsUI.isMuted(buttonDescriptions: buttons)
-            break
         }
-        return state
+        found = search(app.processIdentifier)
+        guard let f = found else { return CallState() }
+        let title = AXDump.attr(f.window, kAXTitleAttribute) as? String
+        return CallState(title: title.flatMap(TeamsUI.meetingTitle), muted: f.mic.flatMap(micState))
     }
 
-    private static func collectButtons(_ e: AXUIElement, depth: Int, budget: inout Int, into out: inout [String]) {
-        guard depth <= 30, budget > 0 else { return }
+    private static func micState(_ button: AXUIElement) -> Bool? {
+        TeamsUI.isMuted(buttonDescriptions: labels(button))
+    }
+
+    private static func labels(_ e: AXUIElement) -> [String] {
+        [kAXDescriptionAttribute, kAXTitleAttribute].compactMap { AXDump.attr(e, $0) as? String }.filter { !$0.isEmpty }
+    }
+
+    private static func search(_ pid: pid_t) -> Found? {
+        let element = AXUIElementCreateApplication(pid)
+        // Teams' web content only exposes its tree when asked.
+        AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        for window in AXDump.children(element, kAXWindowsAttribute) {
+            var budget = 20_000
+            var leave = false
+            var mic: AXUIElement?
+            findButtons(window, depth: 0, budget: &budget, leave: &leave, mic: &mic)
+            // The call window is the one with a "Leave" button.
+            if leave { return Found(pid: pid, window: window, mic: mic, at: Date()) }
+        }
+        return nil
+    }
+
+    private static func findButtons(_ e: AXUIElement, depth: Int, budget: inout Int, leave: inout Bool, mic: inout AXUIElement?) {
+        guard depth <= 30, budget > 0, !(leave && mic != nil) else { return }
         budget -= 1
         if (AXDump.attr(e, kAXRoleAttribute) as? String) == kAXButtonRole as String {
-            if let d = AXDump.attr(e, kAXDescriptionAttribute) as? String, !d.isEmpty { out.append(d) }
-            if let t = AXDump.attr(e, kAXTitleAttribute) as? String, !t.isEmpty { out.append(t) }
+            let l = labels(e)
+            if l.contains(where: { $0.lowercased().hasPrefix("leave") }) { leave = true }
+            if mic == nil, TeamsUI.isMuted(buttonDescriptions: l) != nil { mic = e }
         }
         for child in AXDump.children(e) {
-            collectButtons(child, depth: depth + 1, budget: &budget, into: &out)
+            findButtons(child, depth: depth + 1, budget: &budget, leave: &leave, mic: &mic)
         }
     }
 }
