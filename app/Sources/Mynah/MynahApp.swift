@@ -78,7 +78,7 @@ struct MenuContent: View {
     var body: some View {
         Text(statusLine)
         if !controller.accessibilityOK || !controller.microphoneOK {
-            Button("⚠︎ Permissions needed…") { openSettings() }
+            Button("⚠︎ Permissions needed…") { controller.showOnboarding() }
         }
         Divider()
         if !history.recent.isEmpty {
