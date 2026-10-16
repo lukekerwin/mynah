@@ -1,0 +1,12 @@
+# build outputs
+build/
+app/.build/
+.venv/
+__pycache__/
+*.pyc
+
+# your voice recordings and benchmark outputs stay local
+bench/data/mine/
+bench/data/synthetic/
+bench/results/
+dist/

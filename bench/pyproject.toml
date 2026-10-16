@@ -1,0 +1,21 @@
+[project]
+name = "mynah-bench"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mynah-engine",
+    "jiwer>=4.0.0",
+    "mlx-audio>=0.5.9",
+    "mlx-lm>=0.32.2",
+    "mlx-qwen3-asr>=0.4.4",
+    "mlx-whisper>=0.4.3",
+    "numpy>=2.5.4",
+    "parakeet-mlx>=0.5.3",
+    "sounddevice>=0.5.6",
+    "soundfile>=0.14.0",
+]
+
+[tool.uv.sources]
+mynah-engine = { path = "../engine", editable = true }

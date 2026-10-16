@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  engine:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.13.1"
+      - name: Unit tests
+        working-directory: engine
+        run: |
+          uv lock --check
+          uv run --frozen pytest -q
+
+  app:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build Mynah.app
+        run: scripts/build_app.sh

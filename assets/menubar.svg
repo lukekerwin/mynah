@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 270 860 730">
+  <!-- Template icon: macOS tints it. Bird bust, open beak, one sound wave. -->
+  <path fill="#000" fill-rule="evenodd" d="
+    M 150 1000 C 140 860 168 760 205 680 C 222 640 196 520 246 425 C 290 345 370 300 440 300
+    C 505 300 556 336 574 392 C 588 432 584 470 578 500 L 568 552 C 594 622 640 710 654 820
+    C 664 900 660 960 652 1000 Z
+    M 505 405 m -34 0 a 34 34 0 1 0 68 0 a 34 34 0 1 0 -68 0 Z"/>
+  <path fill="#000" d="M 572 420 C 636 410 712 432 774 470 C 712 484 638 490 580 490 Z"/>
+  <path fill="#000" d="M 580 512 C 640 514 704 518 752 526 C 706 556 638 568 574 556 Z"/>
+  <path fill="none" stroke="#000" stroke-width="64" stroke-linecap="round" d="M 830 400 A 110 110 0 0 1 830 600"/>
+</svg>

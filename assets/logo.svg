@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#2FD3BE"/>
+      <stop offset="1" stop-color="#0B6E66"/>
+    </linearGradient>
+    <linearGradient id="beak" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFC24D"/>
+      <stop offset="1" stop-color="#F7681A"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx="0.45" cy="0.28" r="0.75">
+      <stop offset="0" stop-color="#3A4250"/>
+      <stop offset="1" stop-color="#0E1116"/>
+    </radialGradient>
+    <clipPath id="squircle">
+      <rect x="100" y="100" width="824" height="824" rx="185"/>
+    </clipPath>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  </g>
+  <g clip-path="url(#squircle)">
+    <!-- bird: one silhouette (back, crown, throat, chest) -->
+    <path d="M 190 1000 C 178 860 205 740 250 645 C 272 600 238 480 298 385 C 345 310 420 272 480 274 C 535 276 575 310 590 355 C 608 390 606 440 596 470 L 586 528 C 612 600 668 690 684 800 C 696 880 690 950 680 1000 Z" fill="url(#sheen)"/>
+    <!-- yellow wattle (bare skin) behind the eye -->
+    <path d="M 474 438 C 450 482 456 548 492 592 C 528 562 540 496 518 446 C 506 420 484 420 474 438 Z" fill="#FFD23F"/>
+    <!-- eye -->
+    <circle cx="532" cy="385" r="28" fill="#FFF8E7"/>
+    <circle cx="539" cy="385" r="15" fill="#0E1116"/>
+    <circle cx="544" cy="379" r="5" fill="#FFFFFF"/>
+    <!-- open beak: upper and lower mandibles -->
+    <path d="M 586 398 C 640 392 700 410 752 444 C 700 456 640 460 594 462 Z" fill="url(#beak)"/>
+    <path d="M 594 478 C 645 480 700 484 738 490 C 700 516 640 526 588 518 Z" fill="url(#beak)"/>
+    <!-- sound waves -->
+    <g fill="none" stroke="#FFF6DD" stroke-linecap="round" stroke-width="30">
+      <path d="M 790 420 A 75 75 0 0 1 790 530" opacity="0.95"/>
+      <path d="M 835 375 A 135 135 0 0 1 835 575" opacity="0.7"/>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 800" width="1320" height="800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F3FBF9"/>
+      <stop offset="1" stop-color="#DDF1EC"/>
+    </linearGradient>
+  </defs>
+  <rect width="1320" height="800" fill="url(#bg)"/>
+  <text x="660" y="130" text-anchor="middle" font-family="-apple-system, Helvetica Neue, sans-serif" font-size="64" font-weight="700" fill="#0E1116">Mynah</text>
+  <text x="660" y="190" text-anchor="middle" font-family="-apple-system, Helvetica Neue, sans-serif" font-size="30" fill="#3B4A48">Private, on-device dictation for your Mac</text>
+  <path d="M 545 420 L 745 420" stroke="#0B6E66" stroke-width="10" stroke-linecap="round" fill="none"/>
+  <path d="M 735 392 L 785 420 L 735 448 Z" fill="#0B6E66" stroke="#0B6E66" stroke-width="6" stroke-linejoin="round"/>
+  <text x="660" y="700" text-anchor="middle" font-family="-apple-system, Helvetica Neue, sans-serif" font-size="28" fill="#3B4A48">Drag Mynah into Applications, then open it from there.</text>
+</svg>
