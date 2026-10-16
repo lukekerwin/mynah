@@ -96,3 +96,22 @@ struct RingBufferTests {
         #expect(ring.drain() == [0, 0, 0])
     }
 }
+
+struct SemanticVersionTests {
+    @Test func ordersReleasesAndPreReleases() {
+        let ascending = ["0.1.9", "0.2.0-beta.2", "0.2.0-beta.3", "0.2.0-beta.10", "0.2.0-rc.1", "0.2.0", "0.2.1-beta.1",
+                         "0.2.1", "0.10.0", "1.0.0"]
+        for (i, a) in ascending.enumerated() {
+            for b in ascending[(i + 1)...] {
+                #expect(SemanticVersion.compare(a, b) == .orderedAscending, "\(a) < \(b)")
+                #expect(SemanticVersion.compare(b, a) == .orderedDescending, "\(b) > \(a)")
+            }
+        }
+    }
+
+    @Test func equalVersions() {
+        #expect(SemanticVersion.compare("0.2.0", "0.2.0") == .orderedSame)
+        #expect(SemanticVersion.compare("v0.2", "0.2.0+42") == .orderedSame)
+        #expect(SemanticVersion.compare("0.2.0-beta.1", "0.2.0-beta.1") == .orderedSame)
+    }
+}

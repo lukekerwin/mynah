@@ -23,6 +23,7 @@ enum MynahMain {
 
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About Mynah", action: #selector(AppDelegate.showAbout), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Check for Updates…", action: #selector(AppDelegate.checkForUpdates), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Settings…", action: #selector(AppDelegate.showSettings), keyEquivalent: ",")
         appMenu.addItem(.separator())
@@ -70,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showAbout() { controller.showMain(.about) }
     @objc func showSettings() { controller.showMain(.settings) }
+    @objc func checkForUpdates() { controller.updater.checkForUpdates() }
 
     /// Clicking the Dock icon (shown while a window is open) brings the app window back.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {

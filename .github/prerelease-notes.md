@@ -2,6 +2,8 @@
 
 Meeting capture is **off by default**. Turn it on in **Settings › Meetings**. The setup asks for Notifications and **System Audio Recording** permission. Dictation works the same as in 0.1.x.
 
+**New: in-app updates.** Install this build by hand once; after that Mynah finds and installs new versions itself (Settings › Updates, or Mynah › Check for Updates…). Beta builds follow the beta channel by default.
+
 ### What to try
 - Join a Teams call. Recording starts automatically, or asks first if you choose "Ask me". The menu bar shows a red dot and a timer.
 - **Pause My Mic** (menu or ⌃⌥M) and Teams mute both keep your words out of the transcript.

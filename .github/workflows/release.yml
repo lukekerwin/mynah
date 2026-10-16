@@ -3,6 +3,9 @@ name: Release
 # Push a tag like v0.2.0 (matching the VERSION file) to build and publish a DMG.
 # Tags with a suffix (v0.2.0-beta.1) become pre-releases with .github/prerelease-notes.md,
 # so the "Latest" release people download stays the stable one.
+# Each release is then added to the Sparkle appcast (appcast.xml on the `appcast`
+# branch) that installed copies of Mynah check for updates; pre-releases go in the
+# "beta" channel.
 on:
   push:
     tags: ["v*"]
@@ -18,8 +21,6 @@ jobs:
       - name: Check tag matches VERSION
         run: test "v$(cat VERSION)" = "${GITHUB_REF_NAME}"
       - name: Build app
-        env:
-          MYNAH_BUILD_NUMBER: ${{ github.run_number }}
         run: scripts/build_app.sh
       - name: Build DMG
         run: scripts/make_dmg.sh
@@ -33,3 +34,39 @@ jobs:
           fi
           gh release create "$GITHUB_REF_NAME" dist/Mynah-*.dmg dist/Mynah-*.dmg.sha256 \
             --title "Mynah $(cat VERSION)" "${flags[@]}"
+      - name: Sign update
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/sparkle.tar.xz" \
+            https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-2.10.0.tar.xz
+          echo "c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c  $RUNNER_TEMP/sparkle.tar.xz" | shasum -a 256 -c -
+          mkdir "$RUNNER_TEMP/sparkle" && tar -xf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle" ./bin
+          dmg="dist/Mynah-$(cat VERSION).dmg"
+          sig="$("$RUNNER_TEMP/sparkle/bin/sign_update" --ed-key-file - -p "$dmg" <<< "$SPARKLE_ED_PRIVATE_KEY")"
+          echo "SPARKLE_SIGNATURE=$sig" >> "$GITHUB_ENV"
+          echo "DMG_LENGTH=$(stat -f%z "$dmg")" >> "$GITHUB_ENV"
+      - name: Update appcast
+        run: |
+          version="$(cat VERSION)"
+          notes=.github/release-notes.md
+          beta=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then notes=.github/prerelease-notes.md; beta=(--beta); fi
+          repo="https://github.com/${GITHUB_REPOSITORY}"
+          if git fetch --depth 1 origin appcast; then
+            git worktree add "$RUNNER_TEMP/appcast" FETCH_HEAD
+          else
+            git worktree add --detach "$RUNNER_TEMP/appcast"
+            git -C "$RUNNER_TEMP/appcast" checkout --orphan appcast
+            git -C "$RUNNER_TEMP/appcast" rm -rfq .
+          fi
+          python3 scripts/update_appcast.py "$RUNNER_TEMP/appcast/appcast.xml" --version "$version" \
+            --url "$repo/releases/download/$GITHUB_REF_NAME/Mynah-$version.dmg" \
+            --signature "$SPARKLE_SIGNATURE" --length "$DMG_LENGTH" --notes "$notes" \
+            --release-url "$repo/releases/tag/$GITHUB_REF_NAME" "${beta[@]}"
+          cd "$RUNNER_TEMP/appcast"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add appcast.xml
+          git commit -m "Appcast: Mynah $version"
+          git push origin HEAD:appcast
