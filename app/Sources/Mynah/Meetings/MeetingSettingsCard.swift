@@ -7,6 +7,7 @@ struct MeetingsSettingsCard: View {
     @ObservedObject var engine: EngineClient
     let meetings: MeetingController?
     @State private var showSetup = false
+    @State private var showPeople = false
     @State private var llms: [ModelInfo] = []
 
     private var m: Binding<MeetingSettings> { $settings.data.meetings }
@@ -48,6 +49,16 @@ struct MeetingsSettingsCard: View {
                         Toggle("", isOn: m.teamsMuteDetection).labelsHidden().toggleStyle(TealToggleStyle())
                     }
                     RowDivider()
+                    SettingRow(title: "Recognize speakers",
+                               detail: "After each call, tells the other voices apart and names the ones you've named before. Voiceprints stay on this Mac.") {
+                        HStack(spacing: 10) {
+                            if meetings != nil {
+                                Button("People…") { showPeople = true }.buttonStyle(.quiet)
+                            }
+                            Toggle("", isOn: m.recognizeSpeakers).labelsHidden().toggleStyle(TealToggleStyle())
+                        }
+                    }
+                    RowDivider()
                     SettingRow(title: "Notes model") {
                         PickerField(selection: m.summaryModel) {
                             Text("Same as cleanup model").tag("default")
@@ -78,6 +89,9 @@ struct MeetingsSettingsCard: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showPeople) {
+            if let meetings { PeopleSheet(store: meetings.store) { showPeople = false } }
         }
         .sheet(isPresented: $showSetup) {
             if let meetings {
@@ -210,5 +224,103 @@ struct MeetingSetupView: View {
         .background(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).fill(Theme.card))
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border))
         .animation(.easeOut(duration: 0.2), value: done)
+    }
+}
+
+/// Everyone named from a meeting: rename them, or forget them and their voice.
+private struct PeopleSheet: View {
+    let store: MeetingStore
+    var done: () -> Void
+    @State private var people: [Person] = []
+    @State private var counts: [String: Int] = [:]
+    @State private var confirmForget = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("People").font(Theme.display(20, weight: .bold)).foregroundStyle(Theme.ink)
+                Text("Name a speaker on a meeting's page to add someone. Their voiceprints never leave this Mac.")
+                    .font(Theme.caption).foregroundStyle(Theme.inkSecondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Card(padding: 12) {
+                if people.isEmpty {
+                    EmptyHint(symbol: "person.2", text: "Nobody named yet.")
+                } else {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(Array(people.enumerated()), id: \.element.id) { index, p in
+                                if index > 0 { RowDivider() }
+                                PersonRow(person: p, meetings: counts[p.id] ?? 0,
+                                          rename: { try? store.renamePerson(id: p.id, to: $0); reload() },
+                                          delete: { try? store.deletePerson(id: p.id); reload() })
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 320)
+                }
+            }
+            HStack {
+                Button("Forget all voices…") { confirmForget = true }.buttonStyle(.quiet).disabled(people.isEmpty)
+                Spacer()
+                Button("Done") { done() }.buttonStyle(.accent).keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(22)
+        .frame(width: 460)
+        .background(Theme.canvas)
+        .onAppear(perform: reload)
+        .confirmationDialog("Forget everyone's voice?", isPresented: $confirmForget) {
+            Button("Forget all voices", role: .destructive) {
+                try? store.forgetAllVoices()
+                reload()
+            }
+        } message: {
+            Text("Names and voiceprints are deleted. Transcripts keep “Speaker 1”, “Speaker 2” and so on.")
+        }
+    }
+
+    private func reload() {
+        people = (try? store.people()) ?? []
+        counts = (try? store.meetingCounts()) ?? [:]
+    }
+}
+
+private struct PersonRow: View {
+    var person: Person
+    var meetings: Int
+    var rename: (String) -> Void
+    var delete: () -> Void
+    @State private var name = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(String(person.name.prefix(1)).uppercased())
+                .font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(Theme.teal)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(Theme.tealSoft))
+            VStack(alignment: .leading, spacing: 1) {
+                TextField("Name", text: $name)
+                    .textFieldStyle(.plain).font(Theme.body.weight(.semibold)).foregroundStyle(Theme.ink)
+                    .focused($focused)
+                    .onSubmit(commit)
+                    .onChange(of: focused) { _, f in if !f { commit() } }
+                Text(meetings == 1 ? "Heard in 1 meeting" : "Heard in \(meetings) meetings")
+                    .font(Theme.caption).foregroundStyle(Theme.inkSecondary)
+            }
+            Spacer()
+            Button(action: delete) {
+                Image(systemName: "trash").font(.system(size: 12)).foregroundStyle(Theme.inkSecondary)
+            }
+            .buttonStyle(.plain)
+            .help("Forget \(person.name) and their voice")
+        }
+        .padding(.vertical, 8)
+        .onAppear { name = person.name }
+    }
+
+    private func commit() {
+        let t = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { name = person.name } else if t != person.name { rename(t) }
     }
 }

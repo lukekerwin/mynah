@@ -15,7 +15,7 @@ Meetings (see meeting.py / summarize.py):
     POST /meeting/prepare  {} -> {"ok"}   (downloads + loads the voice detector)
     POST /transcribe {"audio": ..., "offset_s": float, "vocab": [...], "final": bool}
         -> {"segments": [{"start", "end", "text"}], "consumed_s", "asr_ms"}
-    POST /summarize  {"segments": [{"track", "start", "end", "text"}], "title", "my_name",
+    POST /summarize  {"segments": [{"track", "start", "end", "text", "speaker"?}], "title", "my_name",
                       "model": key | null, "duration_s", "meeting_date", "job_id"}
         -> {"title", "tldr", "key_points", "decisions", "open_questions",
             "action_items": [{"text", "owner", "due", "time_s"}], "model", "llm_ms"}

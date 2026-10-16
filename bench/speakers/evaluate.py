@@ -86,6 +86,12 @@ def series_order(meetings: list[str]) -> list[str]:
     return sorted(meetings, key=lambda m: (m[-1], m[:-1]))
 
 
+def unit(v) -> np.ndarray:
+    """Voiceprints aren't unit length (WeSpeaker centroids are ~0.8), so normalize before dot products."""
+    v = np.asarray(v, dtype=np.float64)
+    return v / max(np.linalg.norm(v), 1e-9)
+
+
 def replay(probes: dict[str, dict], owners: dict[str, dict], kind: str, threshold: float) -> dict:
     gallery: dict[str, list[np.ndarray]] = defaultdict(list)
     c = defaultdict(float)
@@ -96,7 +102,7 @@ def replay(probes: dict[str, dict], owners: dict[str, dict], kind: str, threshol
             if info["speechS"] < MIN_SPEAKER_S or not info.get(kind):
                 continue
             truth = owners[m].get(spk)
-            v = np.asarray(info[kind])
+            v = unit(info[kind])
             scores = {p: max(float(v @ e) for e in es) for p, es in gallery.items()}
             best = max(scores, key=scores.get) if scores else None
             guess = best if best is not None and scores[best] >= threshold else None
@@ -122,7 +128,7 @@ def pair_scores(probes, owners, kind):
         for spk, info in p["speakers"].items():
             t = owners[m].get(spk)
             if t and info["speechS"] >= MIN_SPEAKER_S and info.get(kind):
-                items.append((m, t, np.asarray(info[kind])))
+                items.append((m, t, unit(info[kind])))
     same, diff = [], []
     for i in range(len(items)):
         for j in range(i + 1, len(items)):

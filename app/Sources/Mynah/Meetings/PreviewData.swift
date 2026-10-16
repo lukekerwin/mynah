@@ -56,6 +56,18 @@ enum PreviewData {
                                          cursor: t + seconds)
                 t += seconds + 1.2
             }
+            // Two voices on the other side: Priya (recognized) and someone not named yet.
+            let priya = try store.person(named: "Priya")
+            var labels: [Int64: String] = [:]
+            for seg in try store.segments(meetingID: standup.id) where seg.track == .others {
+                if let id = seg.id { labels[id] = seg.text.hasPrefix("Sure") ? "S2" : "S1" }
+            }
+            let voice = Voiceprint.encode((0..<256).map { Float(sin(Double($0))) })
+            try store.saveSpeakers(meetingID: standup.id, [
+                MeetingSpeaker(meetingID: standup.id, label: "S1", number: 1, speechS: 412, embedding: voice),
+                MeetingSpeaker(meetingID: standup.id, label: "S2", number: 2, speechS: 186, embedding: voice,
+                               personID: priya.id, matchScore: 0.86),
+            ], segmentLabels: labels)
             try store.saveSummary(MeetingSummary(
                 meetingID: standup.id, model: "gemma-4-e4b",
                 tldr: "The team confirmed the migration script is ready for review and agreed to run it against staging before Thursday's demo. Pricing page copy is the next open item.",

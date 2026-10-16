@@ -90,11 +90,12 @@ final class SummaryRunner: ObservableObject {
             }
             do {
                 let segments = try store.segments(meetingID: meeting.id)
+                let names = TranscriptFormatter.speakerNames(try store.speakers(meetingID: meeting.id), people: try store.people())
                 let m = settings.data.meetings
                 let df = DateFormatter()
                 df.dateFormat = "yyyy-MM-dd (EEEE)"
                 let result = try await engine.summarize(
-                    segments: TranscriptFormatter.engineSegments(segments), title: meeting.title,
+                    segments: TranscriptFormatter.engineSegments(segments, names: names), title: meeting.title,
                     myName: m.myName.isEmpty ? nil : m.myName,
                     model: m.summaryModel == "default" ? nil : m.summaryModel,
                     duration: meeting.duration ?? (segments.last?.endS ?? 0),

@@ -93,6 +93,25 @@ public final class MeetingStore: Sendable {
                 t.column("text")
             }
         }
+        m.registerMigration("v2-speakers") { db in
+            try db.create(table: "person") { t in
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+            }
+            try db.create(table: "meetingSpeaker") { t in
+                t.column("meetingID", .text).notNull().references("meeting", onDelete: .cascade)
+                t.column("label", .text).notNull()
+                t.primaryKey(["meetingID", "label"])
+                t.column("number", .integer).notNull()
+                t.column("speechS", .double).notNull()
+                t.column("embedding", .blob).notNull()
+                t.column("personID", .text).indexed().references("person", onDelete: .setNull)
+                t.column("matchScore", .double)
+                t.column("namedAt", .datetime)
+            }
+            try db.alter(table: "segment") { t in t.add(column: "speaker", .text) }
+        }
         return m
     }
 
@@ -173,6 +192,91 @@ public final class MeetingStore: Sendable {
         guard !segmentIDs.isEmpty else { return }
         try db.write { db in
             _ = try Segment.filter(keys: segmentIDs).updateAll(db, Column("hiddenReason").set(to: reason))
+        }
+    }
+
+    // MARK: speakers + people
+
+    public func speakers(meetingID: String) throws -> [MeetingSpeaker] {
+        try db.read { try MeetingSpeaker.filter(Column("meetingID") == meetingID).order(Column("number")).fetchAll($0) }
+    }
+
+    /// Everyone named so far, alphabetically.
+    public func people() throws -> [Person] {
+        try db.read { try Person.order(Column("name").collating(.localizedCaseInsensitiveCompare)).fetchAll($0) }
+    }
+
+    /// Voiceprints of named people from other meetings, for recognizing them.
+    public func voiceGallery(excluding meetingID: String) throws -> [(personID: String, voiceprint: [Float])] {
+        try db.read { db in
+            try MeetingSpeaker.filter(Column("personID") != nil && Column("meetingID") != meetingID
+                && Column("speechS") >= SpeakerMatching.minSpeechS && length(Column("embedding")) > 0)
+                .fetchAll(db)
+                .compactMap { s in s.personID.map { ($0, Voiceprint.decode(s.embedding)) } }
+        }
+    }
+
+    /// Replaces a meeting's speakers and points each "Others" segment at one.
+    public func saveSpeakers(meetingID: String, _ speakers: [MeetingSpeaker], segmentLabels: [Int64: String]) throws {
+        try db.write { db in
+            try MeetingSpeaker.filter(Column("meetingID") == meetingID).deleteAll(db)
+            try db.execute(sql: "UPDATE segment SET speaker = NULL WHERE meetingID = ?", arguments: [meetingID])
+            for s in speakers { try s.insert(db) }
+            for (id, label) in segmentLabels {
+                try db.execute(sql: "UPDATE segment SET speaker = ? WHERE id = ?", arguments: [label, id])
+            }
+        }
+    }
+
+    /// The user says who a voice is (nil = "not who Mynah guessed"). Their voiceprint
+    /// then counts toward recognizing that person in later meetings.
+    public func nameSpeaker(meetingID: String, label: String, personID: String?, now: Date = Date()) throws {
+        try db.write { db in
+            try db.execute(sql: """
+                UPDATE meetingSpeaker SET personID = ?, matchScore = NULL, namedAt = ? WHERE meetingID = ? AND label = ?
+                """, arguments: [personID, now, meetingID, label])
+        }
+    }
+
+    /// Returns the person with this name (case-insensitive), creating them if needed.
+    public func person(named name: String) throws -> Person {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try db.write { db in
+            if let p = try Person.fetchAll(db).first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
+                return p
+            }
+            let p = Person(name: name)
+            try p.insert(db)
+            return p
+        }
+    }
+
+    public func renamePerson(id: String, to name: String) throws {
+        try db.write { db in
+            try db.execute(sql: "UPDATE person SET name = ? WHERE id = ?", arguments: [name, id])
+        }
+    }
+
+    /// Their speakers go back to "Speaker N".
+    public func deletePerson(id: String) throws {
+        _ = try db.write { try Person.deleteOne($0, key: id) }
+    }
+
+    /// Deletes everyone and every voiceprint; transcripts keep their "Speaker N" split.
+    public func forgetAllVoices() throws {
+        try db.write { db in
+            try Person.deleteAll(db)
+            try db.execute(sql: "UPDATE meetingSpeaker SET embedding = x'', matchScore = NULL")
+        }
+    }
+
+    /// How many meetings each person has been heard in.
+    public func meetingCounts() throws -> [String: Int] {
+        try db.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT personID, COUNT(DISTINCT meetingID) AS n FROM meetingSpeaker WHERE personID IS NOT NULL GROUP BY personID
+                """)
+            return Dictionary(uniqueKeysWithValues: rows.map { ($0["personID"], $0["n"]) })
         }
     }
 

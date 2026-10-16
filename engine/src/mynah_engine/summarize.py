@@ -18,7 +18,7 @@ MAX_OUTPUT_TOKENS = 2_000
 CHECKPOINT_EVERY = 8
 PREFILL_STEP = 256  # tokens per prefill step; dictation can run between steps
 
-SYSTEM = """You write notes for a recorded call. The transcript lines look like "[mm:ss] Speaker: text". "You" is the person these notes are for; "Others" is everyone else on the call (their individual names are unknown unless someone says them).
+SYSTEM = """You write notes for a recorded call. The transcript lines look like "[mm:ss] Speaker: text". "You" is the person these notes are for. Everyone else appears either by name, as "Speaker N" (a voice that hasn't been named yet), or as "Others" (everyone else together).
 
 Return ONLY a JSON object with exactly these keys:
 {
@@ -35,7 +35,7 @@ Return ONLY a JSON object with exactly these keys:
 
 Rules:
 - Include every commitment or task, whoever owns it.
-- owner is "me" when You commits to something, or when Others ask You to do something and You agree. Use a person's name only if it is said in the call; otherwise "unassigned".
+- owner is "me" when You commits to something, or when Others ask You to do something and You agree. Use a person's name only if it is a speaker's name or is said in the call; never use "Speaker N" or "Others" as an owner, use "unassigned" instead.
 - Only give a due date if a specific date or day is stated; resolve relative days ("Friday") against the meeting date when it is given, else null.
 - The title names the main topic (e.g. "Q3 budget review with finance"), not the app or the date.
 - Use only what is in the transcript. Do not invent names, numbers or tasks. Empty lists are fine.
@@ -67,12 +67,13 @@ def parse_time(stamp: str) -> float | None:
 
 
 def format_transcript(segments: list[dict], my_name: str | None = None) -> str:
-    """'[mm:ss] You: …' / '[mm:ss] Others: …' lines in time order; consecutive lines
-    from the same speaker are merged under the first timestamp."""
+    """'[mm:ss] You: …' / '[mm:ss] Bob: …' lines in time order; consecutive lines
+    from the same speaker are merged under the first timestamp. Lines from the other
+    side use their "speaker" name when the app sent one, else "Others"."""
     you = f"You ({my_name})" if my_name else "You"
     lines: list[list] = []  # [start, speaker, text]
     for seg in sorted(segments, key=lambda s: s["start"]):
-        speaker = you if seg.get("track") == "you" else "Others"
+        speaker = you if seg.get("track") == "you" else (seg.get("speaker") or "Others")
         text = seg.get("text", "").strip()
         if not text:
             continue
