@@ -17,16 +17,32 @@ final class OverlayModel: ObservableObject {
     @Published var levels: [Float] = Array(repeating: 0, count: OverlayModel.barCount)
 
     static let barCount = 16
+    /// How often a new bar enters; the audio unit reports levels every ~10 ms,
+    /// which is far too fast to read.
+    private static let step: TimeInterval = 0.055
+    private var pending: Float = 0
+    private var lastShift = Date.distantPast
+    private var smoothed: Float = 0
 
     func push(level: Float) {
-        // Speech RMS sits around 0.01-0.1; map to 0...1 on a log-ish curve.
-        let scaled = min(1, max(0, (log10(max(level, 1e-4)) + 3.2) / 2.2))
+        // Speech RMS sits around 0.01-0.1. Room noise is ~0.001-0.004 and should
+        // read as flat, so the curve starts at 0.005.
+        let scaled = min(1, max(0, (log10(max(level, 1e-4)) + 2.3) / 1.6))
+        pending = max(pending, scaled)
+        let now = Date()
+        guard now.timeIntervalSince(lastShift) >= Self.step else { return }
+        lastShift = now
+        smoothed = smoothed * 0.35 + pending * 0.65
+        pending = 0
         levels.removeFirst()
-        levels.append(scaled)
+        levels.append(smoothed)
     }
 
     func resetLevels() {
         levels = Array(repeating: 0, count: Self.barCount)
+        pending = 0
+        smoothed = 0
+        lastShift = .distantPast
     }
 }
 
@@ -39,7 +55,7 @@ final class OverlayController {
     private var orderOutWork: DispatchWorkItem?
 
     init() {
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 72),
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 120),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         panel.isFloatingPanel = true
         panel.level = .statusBar
@@ -120,14 +136,14 @@ struct OverlayView: View {
                 .background(
                     Capsule()
                         .fill(Theme.pill)
-                        .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
-                        .shadow(color: glow.opacity(live ? 0.35 : 0), radius: 14)
+                        .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
+                        .shadow(color: glow.opacity(live ? 0.3 : 0), radius: 12)
                 )
                 .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)))
                 .scaleEffect(model.visible ? 1 : 0.85, anchor: .bottom)
                 .opacity(model.visible ? 1 : 0)
                 .animation(.spring(response: 0.3, dampingFraction: 0.8), value: model.phase)
-            Spacer(minLength: 0).frame(height: 14)
+            Spacer(minLength: 0).frame(height: 16)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

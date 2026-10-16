@@ -294,6 +294,6 @@ struct Waveform: View {
                     .frame(width: barWidth, height: minHeight + CGFloat(level) * (maxHeight - minHeight))
             }
         }
-        .animation(.linear(duration: 0.06), value: levels)
+        .animation(.easeOut(duration: 0.055), value: levels)
     }
 }
