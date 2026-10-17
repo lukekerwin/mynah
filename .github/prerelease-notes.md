@@ -1,21 +1,19 @@
-**Beta: not the stable release.** This build has the redesigned app window, menu bar panel and overlay, plus **meeting capture**: Mynah notices when a Microsoft Teams call starts, records the call's audio and your mic as separate tracks, writes a timestamped transcript during the call, and afterwards writes a summary and a to-do list from the action items. Everything runs and stays on your Mac.
-
-Meeting capture is **off by default**. Turn it on in **Settings › Meetings**. The setup asks for Notifications and **System Audio Recording** permission. Dictation works the same as in 0.1.x.
-
-**New: in-app updates.** Install this build by hand once; after that Mynah finds and installs new versions itself (Settings › Updates, or Mynah › Check for Updates…). Beta builds follow the beta channel by default.
+**Beta: not the stable release.** This build adds **speaker recognition** to meeting capture: Mynah tells apart the other people on a call and learns their voices, so after you name someone once, later meetings label them automatically. Everything else is the same as 0.2.1. Voices and names stay on your Mac.
 
 ### What to try
-- Join a Teams call. Recording starts automatically, or asks first if you choose "Ask me". The menu bar shows a red dot and a timer.
-- **Pause My Mic** (menu or ⌃⌥M) and Teams mute both keep your words out of the transcript.
-- Other apps: menu bar › **Record a meeting**, then pick the app or **All System Audio**.
-- **Meetings** and **To-dos** pages in the Mynah window: search, notes, transcripts (filter by You / Others) and your action items.
-- While a call is recorded, a small pill sits at the right edge of the screen. Hover over it to read the transcript as it's written, pin it to keep it open, pause your mic or stop from there. Turn it off under Settings › Meetings › Live transcript.
+- Record a Teams call with two or more other people. When it's processed, the meeting page shows a **Speakers** card: anyone Mynah doesn't know yet is **Speaker 1**, **Speaker 2**, …
+- Name them from the Speakers card, or click a name chip in the transcript. Pick someone you've named before, or **New person…**. **Clear name** undoes a wrong name.
+- In the next call with the same people, they should be named automatically. The notes and to-dos use their names too ("Bob will send the deck").
+- Renamed someone after the notes were written? Use **Write notes again** on the Speakers card.
+- Older meetings whose audio is still saved: **⋯ › Find speakers**.
+- **Settings › Meetings › Recognize speakers** turns it off. **People…** lets you rename or delete people, or forget all voices.
 
 ### Known limitations
-- Speakers are only told apart as **You** and **Others**.
-- On speakers (no headphones), lines your mic picked up from the call are filtered out; this is still being tuned. Headphones give the cleanest transcript.
-- Mute detection and meeting titles come from the Teams window, and only work with the English Teams interface.
+- The first time, Mynah downloads a 21 MB voice model.
+- Your own mic is still always **You**. Only the call audio is split by speaker.
+- People who talk for less than about 5 seconds aren't remembered.
+- Several people in one room on one mic, or someone who joins from a different mic or headset than usual, may come up as a new Speaker. Name them again and Mynah learns that voice too.
 - Updating a beta resets macOS permissions, because builds are ad-hoc signed.
 
 ### Install
-Download **Mynah-*.dmg** below, drag **Mynah** into **Applications**, open it, and use **System Settings › Privacy & Security › Open Anyway** the first time. Requires Apple Silicon and macOS 14. Meeting capture needs macOS 14.2 or later.
+Download **Mynah-*.dmg** below, drag **Mynah** into **Applications**, open it, and use **System Settings › Privacy & Security › Open Anyway** the first time. Already on a beta? Mynah offers this update itself. On the stable channel, turn on **Settings › Updates › Beta versions** or install by hand. Requires Apple Silicon and macOS 14.2 or later for meeting capture.
