@@ -53,9 +53,11 @@ public struct Segment: Codable, Sendable, Identifiable, Hashable, FetchableRecor
     public var text: String
     /// Non-nil hides the segment from transcripts and summaries ("echo").
     public var hiddenReason: String?
+    /// Which `MeetingSpeaker` said it ("Others" track only; nil until speakers are found).
+    public var speaker: String?
 
     public init(id: Int64? = nil, meetingID: String, track: Track, startS: Double, endS: Double, text: String,
-                hiddenReason: String? = nil) {
+                hiddenReason: String? = nil, speaker: String? = nil) {
         self.id = id
         self.meetingID = meetingID
         self.track = track
@@ -63,6 +65,7 @@ public struct Segment: Codable, Sendable, Identifiable, Hashable, FetchableRecor
         self.endS = endS
         self.text = text
         self.hiddenReason = hiddenReason
+        self.speaker = speaker
     }
 
     public mutating func didInsert(_ inserted: InsertionSuccess) { id = inserted.rowID }

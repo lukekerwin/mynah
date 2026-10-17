@@ -353,15 +353,18 @@ private struct LiveLine: View {
     }
 }
 
-/// "You" in teal, "Others" in a neutral tone, so the two sides of a call read at a glance.
+/// "You" in teal, everyone else (by name once known) in a neutral tone, so the two
+/// sides of a call read at a glance.
 struct SpeakerChip: View {
     var track: Track
+    var name: String?
     var onDark = false
 
     var body: some View {
         let you = track == .you
-        Text(you ? "You" : "Others")
+        Text(you ? "You" : name ?? "Others")
             .font(.system(size: 10, weight: .bold, design: .rounded))
+            .lineLimit(1).truncationMode(.tail)
             .foregroundStyle(you ? Theme.teal : (onDark ? Theme.pillText.opacity(0.8) : Theme.inkSecondary))
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(Capsule().fill(you ? Theme.tealSoft : (onDark ? Color.white.opacity(0.1) : Theme.well)))

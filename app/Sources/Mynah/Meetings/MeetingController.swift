@@ -42,6 +42,8 @@ final class MeetingController: ObservableObject {
     /// Teams has been playing for a minute but the tap only produced zeros.
     @Published private(set) var permissionProblem = false
     @Published private(set) var teamsMuted: Bool?
+    /// Meetings whose speakers are being found right now ("Find speakers").
+    @Published private(set) var findingSpeakers: Set<String> = []
 
     let store: MeetingStore
     let processor: MeetingProcessor
@@ -529,6 +531,28 @@ final class MeetingController: ObservableObject {
     func deleteAudio(_ id: String) {
         guard recording?.meetingID != id else { return }
         processor.deleteAudio(meetingID: id)
+    }
+
+    /// Splits a finished meeting's "Others" into voices (meetings from before this
+    /// feature, or a re-run). Needs the meeting's audio.
+    func findSpeakers(_ id: String) {
+        guard recording?.meetingID != id, !findingSpeakers.contains(id) else { return }
+        findingSpeakers.insert(id)
+        Task {
+            await processor.identifySpeakers(meetingID: id)
+            findingSpeakers.remove(id)
+        }
+    }
+
+    /// Names a voice: an existing person, a new name, or nil for "not this person".
+    func nameSpeaker(meetingID: String, label: String, personID: String?) {
+        try? store.nameSpeaker(meetingID: meetingID, label: label, personID: personID)
+    }
+
+    func nameSpeaker(meetingID: String, label: String, newName: String) {
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let person = try? store.person(named: name) else { return }
+        nameSpeaker(meetingID: meetingID, label: label, personID: person.id)
     }
 
     func rename(_ id: String, to title: String) {
