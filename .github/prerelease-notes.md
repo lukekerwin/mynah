@@ -1,4 +1,9 @@
-**Beta: not the stable release.** This build adds **speaker recognition** to meeting capture: Mynah tells apart the other people on a call and learns their voices, so after you name someone once, later meetings label them automatically. Everything else is the same as 0.2.1. Voices and names stay on your Mac.
+**Beta: not the stable release.** This build adds **speaker recognition** to meeting capture: Mynah tells apart the other people on a call and learns their voices, so after you name someone once, later meetings label them automatically. Voices and names stay on your Mac.
+
+### New in beta 2
+- **Fewer "You" lines from other people on speakers.** Mynah is much stricter about what counts as you talking over the call, and it measures the speaker leak steadily across the whole meeting.
+- **Short "yeah" / "okay" lines** your mic picked up from the call are now hidden too.
+- **Teams mute detection** recognizes more versions of the mic button. If Mynah still can't see whether you're muted, it now sends a notification instead of quietly recording your mic.
 
 ### What to try
 - Record a Teams call with two or more other people. When it's processed, the meeting page shows a **Speakers** card: anyone Mynah doesn't know yet is **Speaker 1**, **Speaker 2**, …
