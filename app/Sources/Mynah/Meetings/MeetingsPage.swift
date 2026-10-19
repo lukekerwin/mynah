@@ -442,6 +442,7 @@ struct MeetingDetailPage: View {
     @State private var renaming = false
     @FocusState private var titleFocused: Bool
     @State private var confirmDelete = false
+    @State private var confirmDeleteAudio = false
     @State private var speakerFilter: Track?
     @State private var copied = false
 
@@ -482,6 +483,11 @@ struct MeetingDetailPage: View {
             }
         } message: {
             Text("Its transcript, notes, audio and to-dos will be deleted.")
+        }
+        .confirmationDialog("Delete the audio of “\(model.content.meeting?.title ?? "")”?", isPresented: $confirmDeleteAudio) {
+            Button("Delete audio", role: .destructive) { meetings.deleteAudio(model.meetingID) }
+        } message: {
+            Text("The transcript, notes and to-dos stay. Without the audio, Mynah can't find speakers in this meeting again.")
         }
     }
 
@@ -534,7 +540,7 @@ struct MeetingDetailPage: View {
                         NSWorkspace.shared.activateFileViewerSelecting([MeetingProcessor.directory(m.id)])
                     }
                     .disabled(m.audioDeletedAt != nil)
-                    Button("Delete audio now") { meetings.deleteAudio(m.id) }
+                    Button("Delete audio now…") { confirmDeleteAudio = true }
                         .disabled(m.audioDeletedAt != nil || m.status == .recording)
                     Divider()
                     Button("Delete meeting…", role: .destructive) { confirmDelete = true }
@@ -901,7 +907,10 @@ struct ActionItemRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 10) {
                     Label(item.ownerLabel, systemImage: item.ownerKind == .me ? "person.fill" : "person")
-                    if let due = item.dueDate { Label(due, systemImage: "calendar") }
+                    if let due = item.dueDate.flatMap(DueDate.init) {
+                        Label(due.label, systemImage: "calendar")
+                            .foregroundStyle(due.overdue && !done ? Theme.coral : Theme.inkSecondary)
+                    }
                     if let meetingTitle {
                         Button { jump(item.timeS) } label: {
                             Label(meetingTitle, systemImage: "person.2.wave.2").lineLimit(1)
@@ -984,7 +993,7 @@ struct EditItemView: View {
                 }
                 .buttonStyle(.quiet).foregroundStyle(Theme.coral)
                 Spacer()
-                Button("Cancel") { done() }.buttonStyle(.quiet)
+                Button("Cancel") { done() }.buttonStyle(.quiet).keyboardShortcut(.cancelAction)
                 Button("Save") { save() }.buttonStyle(.accent).keyboardShortcut(.defaultAction)
                     .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
             }
@@ -1050,5 +1059,32 @@ struct AddItemButton: View {
         _ = try? store.addActionItem(text: t, meetingID: meetingID)
         text = ""
         adding = false
+    }
+}
+
+/// A to-do's "YYYY-MM-DD" due date as people read it: "Today", "Tomorrow",
+/// "Yesterday", else "Mon, Oct 20" (with the year when it isn't this year).
+struct DueDate {
+    var label: String
+    var overdue: Bool
+
+    init?(_ iso: String) {
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.dateFormat = "yyyy-MM-dd"
+        guard let date = parser.date(from: iso) else { return nil }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let days = cal.dateComponents([.day], from: today, to: cal.startOfDay(for: date)).day ?? 0
+        overdue = days < 0
+        switch days {
+        case 0: label = "Today"
+        case 1: label = "Tomorrow"
+        case -1: label = "Yesterday"
+        default:
+            let sameYear = cal.component(.year, from: date) == cal.component(.year, from: today)
+            label = sameYear ? date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+                : date.formatted(.dateTime.month(.abbreviated).day().year())
+        }
     }
 }
