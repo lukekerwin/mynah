@@ -27,6 +27,11 @@ public enum BleedGate {
     static let tail = 8  // room reverb: the leak lingers this many blocks…
     static let tailDecayDB: Float = 3  // …fading this much per block
     static let hang = 10  // blocks kept either side of your speech
+    /// Blocks in a row that must beat the predicted leak to count as you: a single
+    /// loud block is the room colouring the leak, a syllable lasts longer.
+    static let minRun = 4
+    /// Blocks of slack before the estimated lag: it's only good to a block or two.
+    static let lagSlack = 2
 
     public struct Coupling: Equatable, Sendable {
         public var lag: Int  // blocks; positive = the mic hears it later
@@ -41,6 +46,38 @@ public enum BleedGate {
         case coupled(Coupling)
         case uncoupled  // enough call audio, and the mic doesn't follow it
         case unknown  // too little call audio to tell
+    }
+
+    /// The coupling over a meeting so far. One window's estimate is noisy (the lag
+    /// jumps a block or two, the level a few dB), so this keeps the median of the
+    /// last few, and only lets go after two windows in a row show no coupling
+    /// (headphones plugged in), not one.
+    public struct Tracker: Sendable {
+        static let keep = 6
+        var recent: [Coupling] = []
+        var misses = 0
+
+        public init() {}
+
+        public var coupling: Coupling? {
+            guard !recent.isEmpty else { return nil }
+            return Coupling(lag: recent.map(\.lag).sorted()[recent.count / 2],
+                            gainDB: recent.map(\.gainDB).sorted()[recent.count / 2])
+        }
+
+        public mutating func update(_ estimate: Estimate) {
+            switch estimate {
+            case let .coupled(c):
+                recent.append(c)
+                if recent.count > Self.keep { recent.removeFirst() }
+                misses = 0
+            case .uncoupled:
+                misses += 1
+                if misses >= 2 { recent = [] }
+            case .unknown:
+                break
+            }
+        }
     }
 
     /// `others` covers the same time as `you`, preceded by `lead` extra samples.
@@ -91,13 +128,22 @@ public enum BleedGate {
         var mine = [Bool](repeating: false, count: m.count)
         for i in m.indices {
             var predicted = floorDB
-            for k in -1...tail {
+            for k in -lagSlack...tail {
                 let j = i + shift - c.lag - k
                 guard j >= 0, j < o.count, o[j] > activeDB else { continue }
                 predicted = max(predicted, o[j] + c.gainDB - tailDecayDB * Float(max(k, 0)))
             }
             guard predicted > floorDB else { continue }
             if m[i] > predicted + marginDB { mine[i] = true } else { leak[i] = true }
+        }
+        // Only runs of loud blocks are you; shorter ones are leak too.
+        var i = 0
+        while i < m.count {
+            guard mine[i] else { i += 1; continue }
+            var j = i
+            while j < m.count, mine[j] { j += 1 }
+            if j - i < minRun { for k in i..<j { mine[k] = false; leak[k] = true } }
+            i = j
         }
         var out = you
         for i in m.indices where leak[i] {

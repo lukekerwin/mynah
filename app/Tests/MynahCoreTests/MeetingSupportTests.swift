@@ -37,6 +37,13 @@ struct TeamsUITests {
         #expect(TeamsUI.isMuted(buttonDescriptions: ["Turn camera off", "Unmute mic", "Leave"]) == true)
         #expect(TeamsUI.isMuted(buttonDescriptions: ["Turn camera off", "Mute mic"]) == false)
         #expect(TeamsUI.isMuted(buttonDescriptions: ["Leave"]) == nil)
+        #expect(TeamsUI.isMuted(buttonDescriptions: ["Unmute (⌘+Shift+M)"]) == true)
+        #expect(TeamsUI.isMuted(buttonDescriptions: ["Mute (⌘+Shift+M)"]) == false)
+        #expect(TeamsUI.isMuted(buttonDescriptions: ["Unmute microphone"]) == true)
+        #expect(TeamsUI.isMuted(buttonDescriptions: ["Turn on microphone"]) == true)
+        #expect(TeamsUI.isMuted(buttonDescriptions: ["Turn off microphone"]) == false)
+        #expect(TeamsUI.isMuted(buttonDescriptions: ["Microphone is muted"]) == true)
+        #expect(TeamsUI.isMuted(buttonDescriptions: ["Mute all", "Mute participant", "Unmute all"]) == nil)
     }
 }
 
