@@ -182,6 +182,12 @@ struct MenuPanel: View {
         MenuAction(symbol: "ladybug", title: probe.recording ? "Stop recording Teams + mic" : "Record Teams + mic") {
             probe.toggleRecording()
         }
+        MenuAction(symbol: "ladybug", title: probe.watchingTiles ? "Stop watching Teams participants" : "Watch Teams participants") {
+            probe.toggleTileWatch()
+        }
+        MenuAction(symbol: "ladybug", title: "Dump Teams accessibility tree") {
+            probe.dumpTeamsAccessibility()
+        }
         MenuAction(symbol: "ladybug", title: "Import probe recording as meeting…") {
             dismiss()
             let panel = NSOpenPanel()

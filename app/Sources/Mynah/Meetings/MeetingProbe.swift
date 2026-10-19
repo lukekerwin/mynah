@@ -11,7 +11,7 @@ import MynahCore
 @MainActor
 final class MeetingProbe: ObservableObject {
     static var enabled: Bool { UserDefaults.standard.bool(forKey: "MynahDebugMeetings") }
-    static let teamsPrefix = "com.microsoft.teams2"
+    nonisolated static let teamsPrefix = "com.microsoft.teams2"
 
     @Published private(set) var logging = false
     @Published private(set) var recording = false
@@ -227,6 +227,116 @@ final class MeetingProbe: ObservableObject {
         return ok ? usage.ri_phys_footprint : 0
     }
 
+    // MARK: participant tiles
+
+    @Published private(set) var watchingTiles = false
+    private var tilesTimer: Timer?
+    private var tilesFile: FileHandle?
+    private var lastTiles: Set<String> = []
+    private var tilesBusy = false
+    private var tilesStart = Date()
+
+    /// Logs every change to Teams' participant tiles and roster entries (labels plus
+    /// the web classes on them and their parents) to a file on the Desktop, to learn
+    /// whether "who's talking" can be read through Accessibility.
+    func toggleTileWatch() {
+        if watchingTiles {
+            tilesTimer?.invalidate()
+            tilesTimer = nil
+            try? tilesFile?.close()
+            tilesFile = nil
+            watchingTiles = false
+            status = "Stopped watching Teams participants"
+            return
+        }
+        guard Permissions.accessibilityGranted else {
+            status = "Needs Accessibility permission"
+            return
+        }
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop/mynah-probe-tiles-\(stamp).txt")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        tilesFile = try? FileHandle(forWritingTo: url)
+        lastTiles = []
+        tilesStart = Date()
+        watchingTiles = true
+        status = "Watching Teams participants → \(url.lastPathComponent)"
+        tilesTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.pollTiles() }
+        }
+    }
+
+    private func pollTiles() {
+        guard watchingTiles, !tilesBusy else { return }
+        tilesBusy = true
+        Task.detached(priority: .userInitiated) {
+            let started = Date()
+            let lines = Set(Self.tileLines())
+            let took = Date().timeIntervalSince(started)
+            await MainActor.run {
+                self.tilesBusy = false
+                guard self.watchingTiles else { return }
+                let t = String(format: "%9.2f", Date().timeIntervalSince(self.tilesStart))
+                let clock = Self.clock.string(from: Date())
+                var out = ""
+                for l in self.lastTiles.subtracting(lines).sorted() { out += "\(t) \(clock) - \(l)\n" }
+                for l in lines.subtracting(self.lastTiles).sorted() { out += "\(t) \(clock) + \(l)\n" }
+                if took > 1 { out += "\(t) \(clock) ! scan took \(String(format: "%.1f", took)) s\n" }
+                self.lastTiles = lines
+                if !out.isEmpty { self.tilesFile?.write(Data(out.utf8)) }
+            }
+        }
+    }
+
+    private static let clock: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
+
+    nonisolated static func tileLines() -> [String] {
+        var lines: [String] = []
+        for app in NSWorkspace.shared.runningApplications where app.bundleIdentifier == teamsPrefix {
+            let element = AXUIElementCreateApplication(app.processIdentifier)
+            AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            AXUIElementSetAttributeValue(element, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            for window in AXDump.children(element, kAXWindowsAttribute) {
+                var budget = 30_000
+                collectTiles(window, depth: 0, budget: &budget, into: &lines)
+            }
+        }
+        return lines
+    }
+
+    private nonisolated static let tileWords = ["video", "muted", "speak", "talk", "participant", "context menu",
+                                               "raised", "present", "sharing", "attendee", "organizer"]
+
+    private nonisolated static func collectTiles(_ e: AXUIElement, depth: Int, budget: inout Int, into lines: inout [String]) {
+        guard depth <= 60, budget > 0 else { return }
+        budget -= 1
+        let label = [kAXDescriptionAttribute, kAXTitleAttribute, kAXValueAttribute]
+            .compactMap { AXDump.attr(e, $0) as? String }.filter { !$0.isEmpty }.joined(separator: " / ")
+        let lower = label.lowercased()
+        if !label.isEmpty, label.count < 300, tileWords.contains(where: lower.contains) {
+            let role = AXDump.attr(e, kAXRoleAttribute) as? String ?? "?"
+            var line = "\(role) \"\(label)\""
+            // The speaking glow, if anywhere, is likely a web class on the tile or a parent.
+            var node: AXUIElement? = e
+            for level in 0..<4 {
+                guard let n = node else { break }
+                if let classes = AXDump.attr(n, "AXDOMClassList") as? [String], !classes.isEmpty {
+                    line += " c\(level)=[\(classes.joined(separator: " "))]"
+                }
+                if let selected = AXDump.attr(n, kAXSelectedAttribute) as? Bool, selected { line += " sel\(level)" }
+                node = AXDump.attr(n, kAXParentAttribute).map { $0 as! AXUIElement }
+            }
+            lines.append(line)
+        }
+        for child in AXDump.children(e) {
+            collectTiles(child, depth: depth + 1, budget: &budget, into: &lines)
+        }
+    }
+
     // MARK: accessibility dump
 
     func dumpTeamsAccessibility() {
@@ -290,7 +400,7 @@ enum AXDump {
     }
 
     static func walk(_ e: AXUIElement, depth: Int, budget: inout Int, into lines: inout [String]) {
-        guard depth <= 25, budget > 0 else { return }
+        guard depth <= 50, budget > 0 else { return }
         budget -= 1
         func s(_ name: String) -> String? {
             guard let v = attr(e, name) as? String, !v.isEmpty else { return nil }
@@ -304,6 +414,7 @@ enum AXDump {
         if let v = s(kAXValueAttribute) { parts.append("value=\"\(v)\"") }
         if let v = s(kAXHelpAttribute) { parts.append("help=\"\(v)\"") }
         if let v = attr(e, kAXValueAttribute) as? NSNumber { parts.append("value=\(v)") }
+        if let v = attr(e, "AXDOMClassList") as? [String], !v.isEmpty { parts.append("class=[\(v.joined(separator: " "))]") }
         lines.append(String(repeating: "  ", count: depth) + parts.joined(separator: " "))
         for child in children(e) {
             walk(child, depth: depth + 1, budget: &budget, into: &lines)
