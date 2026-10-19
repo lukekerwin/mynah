@@ -485,7 +485,9 @@ final class MeetingController: ObservableObject {
             micCandidatesLogged = true
             log.notice("Teams mic button not recognized; mic-like buttons: \(c.isEmpty ? "none" : c.joined(separator: " | "), privacy: .public)")
         }
+        // A call window that was there and is gone means the call ended, not a problem.
         guard call.muted == nil, settings.data.meetings.teamsMuteDetection, !muteProblemReported,
+              !(callWindowSeen && call.windowOpen == false),
               Date().timeIntervalSince(r.since) > 20 else { return }
         muteProblemReported = true
         let why = !call.accessible ? "no Accessibility permission"
