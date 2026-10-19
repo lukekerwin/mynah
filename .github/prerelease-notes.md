@@ -1,5 +1,8 @@
 **Beta: not the stable release.** This build adds **speaker recognition** to meeting capture: Mynah tells apart the other people on a call and learns their voices, so after you name someone once, later meetings label them automatically. Voices and names stay on your Mac.
 
+### New in beta 6
+- **Going straight from one meeting into the next starts a new recording** instead of carrying the first one on (needs a meeting with a name; ad hoc calls can't be told apart yet).
+
 ### New in beta 5
 - **Sharing your screen no longer ends the recording.** Mynah took Teams hiding the call window while you present as you leaving the call.
 
