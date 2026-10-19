@@ -74,6 +74,8 @@ final class MeetingController: ObservableObject {
     private var callWindowSeen = false
     private var callWindowGoneSince: Date?
     private var lastCallSound = Date()
+    /// Last time the mic heard you (open gate): you may be presenting to a quiet call.
+    private var lastYouSound = Date()
     /// Window gone and the call silent this long: the call is over.
     private static let windowEndSeconds: TimeInterval = 20
     private var sweepTimer: Timer?
@@ -280,6 +282,7 @@ final class MeetingController: ObservableObject {
         callWindowSeen = false
         callWindowGoneSince = nil
         lastCallSound = Date()
+        lastYouSound = Date()
 
         Task {
             do {
@@ -426,6 +429,7 @@ final class MeetingController: ObservableObject {
         guard #available(macOS 14.2, *), let r = recording, let session = session as? MeetingSession else { return }
         let peak = session.takeOthersPeak()
         if peak > 0.01 { lastCallSound = Date() }  // above -40 dBFS: someone's talking
+        if session.takeYouPeak() > 0.05 { lastYouSound = Date() }  // above -26 dBFS: you're talking
         if peak > 0 {
             UserDefaults.standard.set(true, forKey: "MynahSystemAudioVerified")
             permissionProblem = false
@@ -469,7 +473,7 @@ final class MeetingController: ObservableObject {
         }
         if #available(macOS 14.2, *) { (session as? MeetingSession)?.setGate { $0.teamsMuted = muted } }
         reportMuteProblem(call, r)
-        if endIfCallWindowClosed(call.windowOpen, r) { return }
+        if endIfCallWindowClosed(call, r) { return }
         if let title = call.title, title != r.title,
            let m = try? store.meeting(id: meetingID), !m.titleEdited {
             _ = try? store.modifyMeeting(id: meetingID) { $0.title = title }
@@ -500,21 +504,26 @@ final class MeetingController: ObservableObject {
 
     /// Teams can hold the mic after you leave, so the audio-based detector may never
     /// fire. Once the call window has been seen, its closing ends the recording —
-    /// but only after the call has also gone quiet, so a window Teams briefly
-    /// rebuilds (pop-out, full screen) doesn't split the meeting.
-    private func endIfCallWindowClosed(_ open: Bool?, _ r: Recording) -> Bool {
-        guard !r.manual, let open else { return false }
+    /// but only after the call and your mic have also gone quiet, so a window Teams
+    /// briefly rebuilds (pop-out, full screen) or hides while you present doesn't
+    /// split the meeting.
+    private func endIfCallWindowClosed(_ call: TeamsAccessibility.CallState, _ r: Recording) -> Bool {
+        guard !r.manual, let open = call.windowOpen else { return false }
         if open {
             callWindowSeen = true
             callWindowGoneSince = nil
             return false
         }
         guard callWindowSeen else { return false }
+        if callWindowGoneSince == nil {
+            log.notice("Teams call window gone\(call.searchNote.map { "; Teams windows: " + $0 } ?? "", privacy: .public)")
+        }
         let gone = callWindowGoneSince ?? Date()
         callWindowGoneSince = gone
         let now = Date()
         guard now.timeIntervalSince(gone) >= Self.windowEndSeconds,
-              now.timeIntervalSince(lastCallSound) >= Self.windowEndSeconds else { return false }
+              now.timeIntervalSince(lastCallSound) >= Self.windowEndSeconds,
+              now.timeIntervalSince(lastYouSound) >= Self.windowEndSeconds else { return false }
         log.notice("Teams call window closed: ending \(r.meetingID, privacy: .public)")
         stop(discard: false)
         return true
