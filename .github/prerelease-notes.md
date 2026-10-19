@@ -1,5 +1,9 @@
 **Beta: not the stable release.** This build adds **speaker recognition** to meeting capture: Mynah tells apart the other people on a call and learns their voices, so after you name someone once, later meetings label them automatically. Voices and names stay on your Mac.
 
+### New in beta 7
+- **Mynah's window keeps focus** when you close a popover or dialog (like New to-do), instead of dropping behind other apps.
+- **Fewer freezes:** the meeting page no longer reloads the whole meeting every second during a call, Mynah gives up quickly on a busy app (Teams mid-call) when you dictate, and quitting can't hang on the engine.
+
 ### New in beta 6
 - **Going straight from one meeting into the next starts a new recording** instead of carrying the first one on (needs a meeting with a name; ad hoc calls can't be told apart yet).
 
