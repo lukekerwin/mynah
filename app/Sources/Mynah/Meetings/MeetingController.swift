@@ -66,6 +66,9 @@ final class MeetingController: ObservableObject {
     private var silenceTimer: Timer?
     private var teamsOutputSince: Date?
     private var readingTeams = false
+    /// This recording already logged/notified why Teams' mute state can't be read.
+    private var muteProblemReported = false
+    private var micCandidatesLogged = false
     /// Call-window end detection: the window was seen this recording, when it went
     /// away, and when the call last made a sound.
     private var callWindowSeen = false
@@ -271,6 +274,8 @@ final class MeetingController: ObservableObject {
         state = .recording(Recording(meetingID: meeting.id, title: meeting.title, since: Date(), app: app, manual: manual))
         permissionProblem = false
         teamsMuted = nil
+        muteProblemReported = false
+        micCandidatesLogged = false
         teamsOutputSince = nil
         callWindowSeen = false
         callWindowGoneSince = nil
@@ -463,6 +468,7 @@ final class MeetingController: ObservableObject {
             teamsMuted = call.muted
         }
         if #available(macOS 14.2, *) { (session as? MeetingSession)?.setGate { $0.teamsMuted = muted } }
+        reportMuteProblem(call, r)
         if endIfCallWindowClosed(call.windowOpen, r) { return }
         if let title = call.title, title != r.title,
            let m = try? store.meeting(id: meetingID), !m.titleEdited {
@@ -470,6 +476,24 @@ final class MeetingController: ObservableObject {
             r.title = title
             state = .recording(r)
         }
+    }
+
+    /// Unreadable mute state means the mic is recorded while muted. Says so once per
+    /// recording (log + notification), with what the call window offered instead.
+    private func reportMuteProblem(_ call: TeamsAccessibility.CallState, _ r: Recording) {
+        if let c = call.micCandidates, !micCandidatesLogged {
+            micCandidatesLogged = true
+            log.notice("Teams mic button not recognized; mic-like buttons: \(c.isEmpty ? "none" : c.joined(separator: " | "), privacy: .public)")
+        }
+        guard call.muted == nil, settings.data.meetings.teamsMuteDetection, !muteProblemReported,
+              Date().timeIntervalSince(r.since) > 20 else { return }
+        muteProblemReported = true
+        let why = !call.accessible ? "no Accessibility permission"
+            : call.windowOpen == true ? "no mic button found" : "no call window found"
+        log.notice("Teams mute state unreadable: \(why, privacy: .public)")
+        let pause = settings.data.meetings.pauseMicShortcut ? " Press ⌃⌥M to pause your mic." : ""
+        notifications.post("Mynah can't see Teams' mute button",
+                           "Your mic is recorded even while you're muted in Teams.\(pause)", meetingID: r.meetingID)
     }
 
     /// Teams can hold the mic after you leave, so the audio-based detector may never

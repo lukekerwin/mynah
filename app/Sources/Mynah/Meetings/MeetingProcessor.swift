@@ -71,32 +71,39 @@ final class MeetingProcessor {
         }
     }
 
-    /// Per meeting: how the call leaks into the mic, from the last window that showed it.
-    private var couplings: [String: BleedGate.Coupling] = [:]
+    /// Per meeting: how the call leaks into the mic, over the windows so far.
+    private var couplings: [String: BleedGate.Tracker] = [:]
 
     /// Silences the call audio the mic picked up through the speakers (see BleedGate).
     private func removeBleed(meetingID: String, you: [Float], from start: Int) async throws -> [Float] {
         let othersURL = Self.audioURL(Self.directory(meetingID), .others)
         guard FileManager.default.fileExists(atPath: othersURL.path) else { return you }
         let lead = min(start, BleedGate.othersLead)
-        let previous = couplings[meetingID]
-        let (out, coupling) = try await Task.detached(priority: .utility) {
+        let previous = couplings[meetingID] ?? BleedGate.Tracker()
+        let (out, tracker, estimate) = try await Task.detached(priority: .utility) {
             var others = try WAVReader.read(url: othersURL, from: start - lead, count: lead + you.count)
             others += [Float](repeating: 0, count: max(0, lead + you.count - others.count))
-            var coupling = previous
-            switch BleedGate.estimate(you: you, others: others, lead: lead) {
-            case let .coupled(c): coupling = c
-            case .uncoupled: coupling = nil
-            case .unknown: break
-            }
-            guard let coupling else { return (you, nil as BleedGate.Coupling?) }
-            return (BleedGate.apply(coupling, you: you, others: others, lead: lead), coupling)
+            var tracker = previous
+            let estimate = BleedGate.estimate(you: you, others: others, lead: lead)
+            tracker.update(estimate)
+            guard let coupling = tracker.coupling else { return (you, tracker, estimate) }
+            return (BleedGate.apply(coupling, you: you, others: others, lead: lead), tracker, estimate)
         }.value
-        if coupling != previous {
-            log.notice("bleed \(meetingID, privacy: .public): \(coupling.map { "lag \($0.lag * 20) ms, \(Int($0.gainDB)) dB" } ?? "none", privacy: .public)")
+        let used = tracker.coupling.map { "lag \($0.lag * 20) ms, \(Int($0.gainDB)) dB" } ?? "none"
+        let seen: String
+        switch estimate {
+        case let .coupled(c): seen = "lag \(c.lag * 20) ms, \(Int(c.gainDB)) dB"
+        case .uncoupled: seen = "none"
+        case .unknown: seen = "unknown"
         }
-        couplings[meetingID] = coupling
+        log.notice("bleed \(meetingID, privacy: .public): using \(used, privacy: .public) (this window: \(seen, privacy: .public))")
+        couplings[meetingID] = tracker
         return out
+    }
+
+    /// Whether the mic has been hearing the call this meeting (speakers, not headphones).
+    func micHearsCall(meetingID: String) -> Bool {
+        couplings[meetingID]?.coupling != nil
     }
 
     /// After the call: transcribe both tracks to the end (waiting for the engine if
@@ -119,8 +126,6 @@ final class MeetingProcessor {
             }
         }
 
-        couplings[meetingID] = nil
-
         do {
             let all = try store.segments(meetingID: meetingID)
             let echo = try hideEcho(meetingID: meetingID)
@@ -135,6 +140,7 @@ final class MeetingProcessor {
         } catch {
             try? store.setStatus(meetingID, .failed, error: error.localizedDescription)
         }
+        couplings[meetingID] = nil
         await keepOrDeleteAudio(meetingID: meetingID)
     }
 
@@ -142,7 +148,8 @@ final class MeetingProcessor {
     @discardableResult
     func hideEcho(meetingID: String) throws -> [Int64] {
         let all = try store.segments(meetingID: meetingID)
-        let echo = EchoFilter.echoIDs(you: all.filter { $0.track == .you }, others: all.filter { $0.track == .others })
+        let echo = EchoFilter.echoIDs(you: all.filter { $0.track == .you }, others: all.filter { $0.track == .others },
+                                      shortLines: micHearsCall(meetingID: meetingID))
         try store.hide(segmentIDs: echo, reason: "echo")
         return echo
     }

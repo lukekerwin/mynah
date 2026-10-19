@@ -2,20 +2,22 @@ import Foundation
 
 /// On speakers, the mic also hears the other participants. A "You" segment is
 /// treated as echo when most of its words also appear in "Others" segments
-/// spoken at about the same time.
+/// spoken at about the same time. With `shortLines` (the mic is known to hear
+/// the call), one- and two-word lines ("yeah", "okay so") count too when all
+/// their words were just said by the others; otherwise they're too short to judge.
 public enum EchoFilter {
     public static let minWords = 3
     public static let overlapRatio = 0.6
     public static let slack: Double = 1.5  // seconds either side
 
-    public static func echoIDs(you: [Segment], others: [Segment]) -> [Int64] {
+    public static func echoIDs(you: [Segment], others: [Segment], shortLines: Bool = false) -> [Int64] {
         let sortedOthers = others.sorted { $0.startS < $1.startS }
         let otherWords = sortedOthers.map { Set(words($0.text)) }
         var ids: [Int64] = []
         for seg in you {
             guard let id = seg.id else { continue }
             let mine = words(seg.text)
-            guard mine.count >= minWords else { continue }
+            guard !mine.isEmpty, mine.count >= minWords || shortLines else { continue }
             var pool = Set<String>()
             for (i, other) in sortedOthers.enumerated() {
                 if other.startS > seg.endS + slack { break }
@@ -23,7 +25,8 @@ public enum EchoFilter {
             }
             guard !pool.isEmpty else { continue }
             let shared = mine.filter(pool.contains).count
-            if Double(shared) / Double(mine.count) >= overlapRatio { ids.append(id) }
+            let needed = mine.count >= minWords ? overlapRatio : 1
+            if Double(shared) / Double(mine.count) >= needed { ids.append(id) }
         }
         return ids
     }
