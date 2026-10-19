@@ -82,8 +82,9 @@ enum TeamsAccessibility {
             var mic: AXUIElement?
             var candidates: [String] = []
             findButtons(window, depth: 0, budget: &budget, leave: &leave, mic: &mic, candidates: &candidates)
-            // The call window is the one with a "Leave" button.
-            if leave { return Found(pid: pid, window: window, mic: mic, at: Date(), candidates: candidates) }
+            // The call window has a "Leave" button. While you share, Teams may swap it
+            // for a compact window, which still has the mic or a "Stop sharing" button.
+            if leave || mic != nil { return Found(pid: pid, window: window, mic: mic, at: Date(), candidates: candidates) }
             let title = AXDump.attr(window, kAXTitleAttribute) as? String ?? "?"
             seen.append("\"\(title)\" (\(20_000 - budget) elements\(candidates.isEmpty ? "" : ", buttons: " + candidates.joined(separator: " | ")))")
         }
@@ -97,7 +98,9 @@ enum TeamsAccessibility {
         budget -= 1
         if (AXDump.attr(e, kAXRoleAttribute) as? String) == kAXButtonRole as String {
             let l = labels(e)
-            if l.contains(where: { $0.lowercased().hasPrefix("leave") }) { leave = true }
+            if l.contains(where: { ["leave", "stop sharing", "stop presenting"].contains(where: $0.lowercased().hasPrefix) }) {
+                leave = true
+            }
             if mic == nil, TeamsUI.isMuted(buttonDescriptions: l) != nil { mic = e }
             let joined = l.joined(separator: " / ")
             if candidates.count < 8, ["mic", "mute", "audio", "leave", "hang up"].contains(where: joined.lowercased().contains) {

@@ -73,6 +73,11 @@ final class MeetingSession {
         return peak
     }
 
+    /// Peak of the "You" track since the last call (silence while gated).
+    func takeYouPeak() -> Float {
+        youWriter?.takeStats().peak ?? 0
+    }
+
     func samplesWritten(_ track: Track) -> Int {
         (track == .you ? youWriter : othersWriter)?.samplesWritten ?? 0
     }
