@@ -1,5 +1,9 @@
 **Beta: not the stable release.** This build adds **speaker recognition** to meeting capture: Mynah tells apart the other people on a call and learns their voices, so after you name someone once, later meetings label them automatically. Voices and names stay on your Mac.
 
+### New in beta 4
+- Leaving a Teams call no longer sends a false "can't see Teams' mute button" warning.
+- Debug menu only: **Watch Teams participants** records how Teams' participant tiles change during a call, to explore naming speakers from who Teams shows as talking.
+
 ### New in beta 3
 - **Teams mute detection works on a fresh Teams.** Mynah couldn't read Teams' call window unless something else had already made it readable, so being muted was never noticed and leaving the call didn't end the recording. Both work now.
 
