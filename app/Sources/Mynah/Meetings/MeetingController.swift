@@ -74,6 +74,10 @@ final class MeetingController: ObservableObject {
     private var callWindowSeen = false
     private var callWindowGoneSince: Date?
     private var lastCallSound = Date()
+    /// The meeting this recording is of (from the full call window's title), and a
+    /// different one seen since, with how many reads in a row.
+    private var callTitle: String?
+    private var nextTitle: (title: String, reads: Int)?
     /// Last time the mic heard you (open gate): you may be presenting to a quiet call.
     private var lastYouSound = Date()
     /// Window gone and the call silent this long: the call is over.
@@ -283,6 +287,8 @@ final class MeetingController: ObservableObject {
         callWindowGoneSince = nil
         lastCallSound = Date()
         lastYouSound = Date()
+        callTitle = nil
+        nextTitle = nil
 
         Task {
             do {
@@ -474,7 +480,8 @@ final class MeetingController: ObservableObject {
         if #available(macOS 14.2, *) { (session as? MeetingSession)?.setGate { $0.teamsMuted = muted } }
         reportMuteProblem(call, r)
         if endIfCallWindowClosed(call, r) { return }
-        if let title = call.title, title != r.title,
+        if splitIfNewMeeting(call, r) { return }
+        if let title = call.title, title == callTitle, title != r.title,
            let m = try? store.meeting(id: meetingID), !m.titleEdited {
             _ = try? store.modifyMeeting(id: meetingID) { $0.title = title }
             r.title = title
@@ -500,6 +507,26 @@ final class MeetingController: ObservableObject {
         let pause = settings.data.meetings.pauseMicShortcut ? " Press ⌃⌥M to pause your mic." : ""
         notifications.post("Mynah can't see Teams' mute button",
                            "Your mic is recorded even while you're muted in Teams.\(pause)", meetingID: r.meetingID)
+    }
+
+    /// Leaving one meeting and joining the next within the window-closed grace looks
+    /// like one call. A different meeting name in the full call window, seen on two
+    /// reads in a row (~4 s), ends this recording and starts on the new meeting.
+    /// Calls without a meeting name (ad hoc calls) can't be told apart this way.
+    private func splitIfNewMeeting(_ call: TeamsAccessibility.CallState, _ r: Recording) -> Bool {
+        guard !r.manual, call.windowOpen == true, call.fullCallWindow, let title = call.title else { return false }
+        guard let current = callTitle, title != current else {
+            callTitle = title
+            nextTitle = nil
+            return false
+        }
+        let reads = nextTitle?.title == title ? nextTitle!.reads + 1 : 1
+        nextTitle = (title, reads)
+        guard reads >= 2 else { return false }
+        log.notice("Teams meeting changed (\(current, privacy: .private) → \(title, privacy: .private)): ending \(r.meetingID, privacy: .public)")
+        stop(discard: false)
+        callStarted()
+        return true
     }
 
     /// Teams can hold the mic after you leave, so the audio-based detector may never
