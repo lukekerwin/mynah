@@ -167,7 +167,7 @@ struct MeetingSetupView: View {
                     Text("A small voice-detection model (about 2 MB) downloads when you finish.")
                         .font(Theme.caption).foregroundStyle(Theme.inkSecondary)
                     Spacer()
-                    Button("Cancel") { done() }.buttonStyle(.quiet)
+                    Button("Cancel") { done() }.buttonStyle(.quiet).keyboardShortcut(.cancelAction)
                     Button("Turn on") {
                         settings.data.meetings.consentAcknowledged = true
                         settings.data.meetings.enabled = true

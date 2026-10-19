@@ -65,6 +65,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.launch()
     }
 
+    /// Quitting mid-call would cut the recording off; ask first.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard controller.meetings?.isRecording == true else { return .terminateNow }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "A call is being recorded"
+        alert.informativeText = "Quitting stops the recording. What's been recorded so far is transcribed the next time Mynah opens."
+        alert.addButton(withTitle: "Stop Recording and Quit")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
+        controller.meetings?.stop(discard: false)
+        return .terminateNow
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         controller.shutdown()
     }
