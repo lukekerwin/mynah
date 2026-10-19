@@ -34,6 +34,24 @@ struct BleedGateTests {
         return y
     }
 
+    /// A loud laptop-speaker leak as a real room colours it: the level drifts ±5 dB
+    /// from one ~100 ms stretch to the next, with a longer reverb tail.
+    func roomLeak(_ others: [Float], delay: Int, gain: Float, seed: UInt64) -> [Float] {
+        var rng = Rng(seed)
+        var y = [Float](repeating: 0, count: others.count)
+        for (d, g) in [(delay, gain), (delay + 800, gain * 0.5), (delay + 1_900, gain * 0.3), (delay + 4_000, gain * 0.12)] {
+            for s in d..<others.count { y[s] += g * others[s - d] }
+        }
+        var i = 0
+        while i < y.count {
+            let len = Int(rng.uniform(0.05, 0.15) * Double(Self.rate))
+            let g = Float(pow(10, rng.uniform(-5, 5) / 20))
+            for s in i..<min(y.count, i + len) { y[s] *= g }
+            i += len
+        }
+        return y
+    }
+
     func noise(_ n: Int, level: Float, seed: UInt64) -> [Float] {
         var rng = Rng(seed)
         return (0..<n).map { _ in level * Float(rng.uniform(-1, 1)) }
@@ -95,6 +113,41 @@ struct BleedGateTests {
         let out = BleedGate.apply(c, you: w.you, others: w.others, lead: w.lead)
         #expect(energy(out, talking) > energy(w.you, talking) * 0.9)
         #expect(energy(out, talking.upperBound + 0.5...13.9) < energy(w.you, talking.upperBound + 0.5...13.9) * 0.05)
+    }
+
+    /// Speakers loud enough that the mic hears the call at -3 to -9 dB, unevenly.
+    @Test(arguments: [(UInt64(30), Float(0.7), 1_600), (31, 0.5, 2_400), (32, 0.35, 800)])
+    func removesALoudUnevenLeak(seed: UInt64, gain: Float, delay: Int) throws {
+        let others = speech(seconds: 16, seed: seed, level: 0.3, talking: [0...16])
+        let me = speech(seconds: 16, seed: seed + 100, level: 0.3, talking: [7...9])
+        let mic = add(add(roomLeak(others, delay: delay, gain: gain, seed: seed + 200), me),
+                      noise(others.count, level: 0.0005, seed: seed + 300))
+        let w = window(others, mic, from: 32_000)
+        guard case let .coupled(c) = BleedGate.estimate(you: w.you, others: w.others, lead: w.lead) else {
+            Issue.record("expected coupling")
+            return
+        }
+        let out = BleedGate.apply(c, you: w.you, others: w.others, lead: w.lead)
+        let kept = energy(out, 0...4.5) / energy(w.you, 0...4.5)
+        let keptAfter = energy(out, 7.5...13.9) / energy(w.you, 7.5...13.9)
+        #expect(kept < 0.15)
+        #expect(keptAfter < 0.15)
+        // You talk at 5…7 s in the window, over the call; this loud a leak masks some of it.
+        #expect(energy(out, 5...7) > energy(w.you, 5...7) * 0.75)
+    }
+
+    @Test func trackerSmoothsAndHoldsOnToTheCoupling() {
+        var t = BleedGate.Tracker()
+        #expect(t.coupling == nil)
+        for (lag, gain) in [(1, Float(-10)), (2, -9), (0, -3), (3, -6), (1, -7)] {
+            t.update(.coupled(.init(lag: lag, gainDB: gain)))
+        }
+        #expect(t.coupling == .init(lag: 1, gainDB: -7))
+        t.update(.unknown)
+        t.update(.uncoupled)  // one odd window doesn't drop it
+        #expect(t.coupling == .init(lag: 1, gainDB: -7))
+        t.update(.uncoupled)  // two in a row: headphones
+        #expect(t.coupling == nil)
     }
 
     @Test func leavesHeadphoneAudioAlone() {

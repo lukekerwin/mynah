@@ -18,6 +18,18 @@ struct EchoFilterTests {
         #expect(EchoFilter.echoIDs(you: you, others: others) == [2])
     }
 
+    @Test func shortLinesOnlyWhenTheMicHearsTheCall() {
+        let others = [seg(1, .others, 10, 14, "Yeah, okay, let's ship it on Friday then.")]
+        let you = [
+            seg(2, .you, 11, 11.5, "Yeah."),  // echo
+            seg(3, .you, 13, 13.6, "okay then"),  // echo
+            seg(4, .you, 12, 12.5, "Sounds good."),  // not said by the others
+            seg(5, .you, 30, 30.4, "Yeah."),  // no time overlap
+        ]
+        #expect(EchoFilter.echoIDs(you: you, others: others).isEmpty)
+        #expect(EchoFilter.echoIDs(you: you, others: others, shortLines: true) == [2, 3])
+    }
+
     @Test func overlapUsesSlackAndMultipleOthers() {
         let others = [seg(1, .others, 1, 3.2, "the launch moves"), seg(2, .others, 3.2, 4, "to November third")]
         let you = [seg(3, .you, 4.5, 5.5, "the launch moves to November third")]  // both within 1.5 s slack

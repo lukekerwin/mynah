@@ -61,12 +61,19 @@ public enum TeamsUI {
         return name.isEmpty ? nil : name
     }
 
-    /// From the call toolbar's mic button: "Unmute mic" while muted, "Mute mic" while live.
+    /// From the call toolbar's mic button: "Unmute mic" while muted, "Mute mic" while
+    /// live. Also takes the wordings other Teams builds use ("Unmute (⌘+Shift+M)",
+    /// "Turn on microphone", "Mic is muted"), but not "Mute all" and the like.
     public static func isMuted(buttonDescriptions: [String]) -> Bool? {
         for d in buttonDescriptions {
-            let lower = d.lowercased()
-            if lower.hasPrefix("unmute mic") { return true }
-            if lower.hasPrefix("mute mic") { return false }
+            let l = d.lowercased().trimmingCharacters(in: .whitespaces)
+            if l == "unmute" || ["unmute mic", "unmute (", "turn on mic", "turn mic on"].contains(where: l.hasPrefix) {
+                return true
+            }
+            if l == "mute" || ["mute mic", "mute (", "turn off mic", "turn mic off"].contains(where: l.hasPrefix) {
+                return false
+            }
+            if l.hasPrefix("mic"), l.contains(" muted"), !l.contains("unmuted") { return true }
         }
         return nil
     }
