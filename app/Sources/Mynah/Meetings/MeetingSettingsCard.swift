@@ -181,7 +181,7 @@ struct MeetingSetupView: View {
                     Text("A small voice-detection model (about 2 MB) downloads when you finish.")
                         .font(Theme.caption).foregroundStyle(Theme.inkSecondary)
                     Spacer()
-                    Button("Cancel") { done() }.buttonStyle(.quiet)
+                    Button("Cancel") { done() }.buttonStyle(.quiet).keyboardShortcut(.cancelAction)
                     Button("Turn on") {
                         settings.data.meetings.consentAcknowledged = true
                         settings.data.meetings.enabled = true
@@ -291,6 +291,7 @@ private struct PersonRow: View {
     var rename: (String) -> Void
     var delete: () -> Void
     @State private var name = ""
+    @State private var confirmForget = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -309,7 +310,7 @@ private struct PersonRow: View {
                     .font(Theme.caption).foregroundStyle(Theme.inkSecondary)
             }
             Spacer()
-            Button(action: delete) {
+            Button { confirmForget = true } label: {
                 Image(systemName: "trash").font(.system(size: 12)).foregroundStyle(Theme.inkSecondary)
             }
             .buttonStyle(.plain)
@@ -317,6 +318,11 @@ private struct PersonRow: View {
         }
         .padding(.vertical, 8)
         .onAppear { name = person.name }
+        .confirmationDialog("Forget \(person.name)?", isPresented: $confirmForget) {
+            Button("Forget \(person.name)", role: .destructive, action: delete)
+        } message: {
+            Text("Their name and voice are deleted. Meetings they were in show them as “Speaker 1”, “Speaker 2” and so on.")
+        }
     }
 
     private func commit() {

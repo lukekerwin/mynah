@@ -62,10 +62,12 @@ final class MainWindowController {
             if let size = ProcessInfo.processInfo.environment["MYNAH_UI_SIZE"]?.split(separator: "x"), size.count == 2,
                let w = Double(size[0]), let h = Double(size[1]) {
                 window.setContentSize(NSSize(width: w, height: h))
+                window.center()
             } else {
+                // Restore the saved frame; center only the first time.
+                if !window.setFrameUsingName("MynahMain") { window.center() }
                 window.setFrameAutosaveName("MynahMain")
             }
-            window.center()
             self.window = window
         }
         NotificationCenter.default.post(name: .mynahShowPage, object: PageRequest(page: page, meeting: meeting))
@@ -83,18 +85,33 @@ struct MainWindow: View {
     @ObservedObject var history: HistoryStore
     @State private var page: Page = .home
     @State private var meeting: MeetingFocus?
+    private static let top = "top"
 
     var body: some View {
         HStack(spacing: 0) {
-            Sidebar(page: $page, engine: engine, meetings: controller.meetings)
+            Sidebar(page: page, engine: engine, meetings: controller.meetings) { item in
+                // A sidebar click opens the page from the start: the Meetings list, not
+                // the meeting last opened (also when you're already inside a meeting).
+                page = item
+                meeting = nil
+            }
             Rectangle().fill(Theme.border).frame(width: 1)
-            ScrollView {
-                pageView
-                    .padding(.horizontal, 32)
-                    .padding(.top, 40)
-                    .padding(.bottom, 32)
-                    .frame(maxWidth: 680, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        Color.clear.frame(height: 0).id(Self.top)
+                        pageView
+                            .padding(.horizontal, 32)
+                            .padding(.top, 40)
+                            .padding(.bottom, 32)
+                            .frame(maxWidth: 680, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                // A new page starts fresh; opening or leaving a meeting starts at the top
+                // (the list keeps its search and filters).
+                .id(page)
+                .onChange(of: meeting) { proxy.scrollTo(Self.top, anchor: .top) }
             }
             .background(Theme.canvas)
         }
@@ -154,9 +171,10 @@ extension Notification.Name {
 // MARK: - Sidebar
 
 private struct Sidebar: View {
-    @Binding var page: Page
+    var page: Page
     @ObservedObject var engine: EngineClient
     let meetings: MeetingController?
+    let select: (Page) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -170,7 +188,7 @@ private struct Sidebar: View {
 
             VStack(spacing: 2) {
                 ForEach(Page.allCases.filter { $0 != .about }) { item in
-                    SidebarItem(page: item, selected: page == item, meetings: item == .meetings ? meetings : nil) { page = item }
+                    SidebarItem(page: item, selected: page == item, meetings: item == .meetings ? meetings : nil) { select(item) }
                 }
             }
             .padding(.horizontal, 10)
@@ -178,7 +196,7 @@ private struct Sidebar: View {
             Spacer()
 
             VStack(alignment: .leading, spacing: 10) {
-                SidebarItem(page: .about, selected: page == .about) { page = .about }
+                SidebarItem(page: .about, selected: page == .about) { select(.about) }
                     .padding(.horizontal, 10)
                 EngineStatusBadge(engine: engine).padding(.horizontal, 20)
             }
@@ -529,6 +547,8 @@ private struct HistoryPage: View {
                     Button("Clear history") { confirmClear = true }.buttonStyle(.quiet)
                         .confirmationDialog("Delete all dictation history?", isPresented: $confirmClear) {
                             Button("Delete", role: .destructive) { history.clear() }
+                        } message: {
+                            Text("This can't be undone.")
                         }
                 }
             }

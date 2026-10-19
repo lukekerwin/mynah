@@ -34,6 +34,8 @@ final class LiveTranscriptController {
     private var subscriptions = Set<AnyCancellable>()
     private var hoverTimer: Timer?
     private var collapseWork: DispatchWorkItem?
+    /// Set by Close: hovering doesn't reopen the card until the mouse has left it.
+    private var ignoreHover = false
     private var orderOutWork: DispatchWorkItem?
 
     init(meetings: MeetingController, settings: SettingsStore) {
@@ -77,6 +79,7 @@ final class LiveTranscriptController {
         case .open: expand()
         case .close:
             model.pinned = false
+            ignoreHover = true
             collapse()
         case .pin:
             model.pinned.toggle()
@@ -141,6 +144,10 @@ final class LiveTranscriptController {
 
     private func pollMouse() {
         let inside = NSMouseInRect(NSEvent.mouseLocation, panel.frame.insetBy(dx: -6, dy: -6), false)
+        if ignoreHover {
+            if !inside { ignoreHover = false }
+            return
+        }
         if inside {
             collapseWork?.cancel()
             collapseWork = nil
