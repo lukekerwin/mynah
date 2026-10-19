@@ -294,7 +294,10 @@ final class EngineClient: ObservableObject {
             self.process = nil
             if process.isRunning {
                 process.terminate()
-                process.waitUntilExit()
+                // Up to 2 s to exit cleanly (this runs on Quit and Restart, on main), then kill.
+                let deadline = Date().addingTimeInterval(2)
+                while process.isRunning, Date() < deadline { usleep(20_000) }
+                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
             }
             try? FileManager.default.removeItem(at: Self.pidFile)
         }

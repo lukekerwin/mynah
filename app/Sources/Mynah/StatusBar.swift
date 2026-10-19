@@ -12,6 +12,8 @@ final class StatusBarController {
     private let host: NSHostingView<MenuPanel>
     private var subscriptions = Set<AnyCancellable>()
     private var monitors: [Any] = []
+    /// The window that was key before the panel took it, given back when it closes.
+    private weak var previousKey: NSWindow?
     private weak var controller: AppController?
 
     private static let bird: NSImage? = {
@@ -72,6 +74,7 @@ final class StatusBarController {
         let y = anchor.minY - size.height - 6
         panel.setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true)
         panel.alphaValue = 0
+        previousKey = NSApp.keyWindow === panel ? nil : NSApp.keyWindow
         panel.makeKeyAndOrderFront(nil)
         item.button?.highlight(true)
         NSAnimationContext.runAnimationGroup { ctx in
@@ -98,6 +101,10 @@ final class StatusBarController {
         monitors = []
         item.button?.highlight(false)
         panel.orderOut(nil)
+        // Closed with Escape or an action: otherwise no window is left key and typing
+        // goes nowhere. (A click in another app deactivates Mynah, so nothing to do.)
+        if let w = previousKey, w.isVisible, NSApp.isActive, NSApp.keyWindow == nil { w.makeKey() }
+        previousKey = nil
     }
 
     private func refreshIcon() {
