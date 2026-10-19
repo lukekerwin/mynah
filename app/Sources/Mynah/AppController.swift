@@ -84,14 +84,19 @@ final class AppController: ObservableObject {
     // MARK: lifecycle
 
     func launch() {
+        // Every Accessibility call (other apps' focus, Teams' call window) gives up after
+        // 1 s instead of the default ~6 s when the other app is busy.
+        AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1)
         statusBar = StatusBarController(controller: self)
         // Show a Dock icon while any window is open, so the app can be found,
         // reopened, or force-quit like a normal app; hide it again after.
+        // Synchronous (queue .main), so the two can't land out of order.
         NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.updateActivationPolicy() }
+            MainActor.assumeIsolated { self?.updateActivationPolicy() }
         }
-        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.updateActivationPolicy(closing: true) }
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { [weak self] note in
+            let closing = note.object as? NSWindow
+            MainActor.assumeIsolated { self?.updateActivationPolicy(closing: closing) }
         }
         if let mode = ProcessInfo.processInfo.environment["MYNAH_UI_PREVIEW"] {
             previewUI(mode)
@@ -122,8 +127,12 @@ final class AppController: ObservableObject {
         mainWindow.show(page, meeting: meeting, controller: self)
     }
 
-    private func updateActivationPolicy(closing: Bool = false) {
-        let open = NSApp.windows.filter { $0.isVisible && $0.styleMask.contains(.titled) }.count - (closing ? 1 : 0)
+    /// `closing` is still visible while it closes, so it's left out of the count. (It
+    /// used to be subtracted blindly: closing any popover, e.g. "New to-do", with only
+    /// the main window open counted zero windows, went `.accessory`, and sent the
+    /// main window behind the previous app.)
+    private func updateActivationPolicy(closing: NSWindow? = nil) {
+        let open = NSApp.windows.filter { $0 !== closing && $0.isVisible && $0.styleMask.contains(.titled) }.count
         let policy: NSApplication.ActivationPolicy = open > 0 ? .regular : .accessory
         if NSApp.activationPolicy() != policy { NSApp.setActivationPolicy(policy) }
     }

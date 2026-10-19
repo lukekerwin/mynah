@@ -80,8 +80,7 @@ struct MeetingsPage: View {
 
     var body: some View {
         if let focus {
-            MeetingDetailPage(model: MeetingDetailModel(meetingID: focus.meetingID, controller: meetings),
-                              meetings: meetings, settings: settings, focusTime: focus.time) {
+            MeetingDetailPage(meetingID: focus.meetingID, meetings: meetings, settings: settings, focusTime: focus.time) {
                 self.focus = nil
             }
             .id(focus.meetingID)
@@ -453,9 +452,12 @@ struct MeetingDetailPage: View {
     @State private var speakerFilter: Track?
     @State private var copied = false
 
-    init(model: MeetingDetailModel, meetings: MeetingController, settings: SettingsStore, focusTime: Double?,
+    init(meetingID: String, meetings: MeetingController, settings: SettingsStore, focusTime: Double?,
          back: @escaping () -> Void) {
-        _model = StateObject(wrappedValue: model)
+        // Built inside the autoclosure so it happens once per page, not on every parent
+        // redraw (each model starts its observation with a full synchronous fetch, and
+        // the parent redraws every second while a call is recording).
+        _model = StateObject(wrappedValue: MeetingDetailModel(meetingID: meetingID, controller: meetings))
         self.meetings = meetings
         self.settings = settings
         _focusTime = State(initialValue: focusTime)

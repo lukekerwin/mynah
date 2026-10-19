@@ -17,6 +17,9 @@ struct FocusContext {
         guard let pid = app?.processIdentifier else { return ctx }
 
         let appElement = AXUIElementCreateApplication(pid)
+        // This runs on the hotkey press; a busy app (Teams mid-call) must not stall it
+        // for the default ~6 s per call.
+        AXUIElementSetMessagingTimeout(appElement, 0.25)
         // Electron apps (Slack, VS Code, Cursor...) only expose their AX tree when asked.
         AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
 
