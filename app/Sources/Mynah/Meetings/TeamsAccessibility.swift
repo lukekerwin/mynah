@@ -21,6 +21,8 @@ enum TeamsAccessibility {
         /// From a fresh search that found the call window but no recognizable mic
         /// button: labels of the buttons that look mic-related, for the log.
         var micCandidates: [String]?
+        /// From a search that found no call window: what the Teams windows held, for the log.
+        var searchNote: String?
     }
 
     private struct Found {
@@ -35,11 +37,14 @@ enum TeamsAccessibility {
     private static var found: Found?
     /// A call window without a recognizable mic button is searched again after this.
     private static let researchAfter: TimeInterval = 10
+    private static var lastMiss: String?
 
     static func read() -> CallState {
         guard Permissions.accessibilityGranted else { return CallState(accessible: false) }
-        guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == MeetingDetector.teamsPrefix })
-        else { return CallState(windowOpen: false) }
+        let apps = NSWorkspace.shared.runningApplications
+        guard let app = apps.first(where: { $0.bundleIdentifier == MeetingDetector.teamsPrefix })
+            ?? apps.first(where: { $0.activationPolicy == .regular && $0.bundleIdentifier?.hasPrefix(MeetingDetector.teamsPrefix) == true })
+        else { return CallState(windowOpen: false, searchNote: "Teams app not running") }
         lock.lock()
         defer { lock.unlock() }
         if let f = found, f.pid == app.processIdentifier,
@@ -50,7 +55,7 @@ enum TeamsAccessibility {
             }
         }
         found = search(app.processIdentifier)
-        guard let f = found else { return CallState(windowOpen: false) }
+        guard let f = found else { return CallState(windowOpen: false, searchNote: lastMiss) }
         let title = AXDump.attr(f.window, kAXTitleAttribute) as? String
         return CallState(title: title.flatMap(TeamsUI.meetingTitle), muted: f.mic.flatMap(micState), windowOpen: true,
                          micCandidates: f.mic == nil ? f.candidates : nil)
@@ -66,8 +71,11 @@ enum TeamsAccessibility {
 
     private static func search(_ pid: pid_t) -> Found? {
         let element = AXUIElementCreateApplication(pid)
-        // Teams' web content only exposes its tree when asked.
+        // Teams' web content only exposes its tree when asked: Electron listens for the
+        // first attribute, Chromium web views (new Teams) for the second.
         AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(element, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        var seen: [String] = []
         for window in AXDump.children(element, kAXWindowsAttribute) {
             var budget = 20_000
             var leave = false
@@ -76,7 +84,10 @@ enum TeamsAccessibility {
             findButtons(window, depth: 0, budget: &budget, leave: &leave, mic: &mic, candidates: &candidates)
             // The call window is the one with a "Leave" button.
             if leave { return Found(pid: pid, window: window, mic: mic, at: Date(), candidates: candidates) }
+            let title = AXDump.attr(window, kAXTitleAttribute) as? String ?? "?"
+            seen.append("\"\(title)\" (\(20_000 - budget) elements\(candidates.isEmpty ? "" : ", buttons: " + candidates.joined(separator: " | ")))")
         }
+        lastMiss = seen.isEmpty ? "no Teams windows" : seen.joined(separator: "; ")
         return nil
     }
 
@@ -89,7 +100,7 @@ enum TeamsAccessibility {
             if l.contains(where: { $0.lowercased().hasPrefix("leave") }) { leave = true }
             if mic == nil, TeamsUI.isMuted(buttonDescriptions: l) != nil { mic = e }
             let joined = l.joined(separator: " / ")
-            if candidates.count < 8, ["mic", "mute", "audio"].contains(where: joined.lowercased().contains) {
+            if candidates.count < 8, ["mic", "mute", "audio", "leave", "hang up"].contains(where: joined.lowercased().contains) {
                 candidates.append(joined)
             }
         }

@@ -488,7 +488,7 @@ final class MeetingController: ObservableObject {
         muteProblemReported = true
         let why = !call.accessible ? "no Accessibility permission"
             : call.windowOpen == true ? "no mic button found" : "no call window found"
-        log.notice("Teams mute state unreadable: \(why, privacy: .public)")
+        log.notice("Teams mute state unreadable: \(why, privacy: .public)\(call.searchNote.map { "; Teams windows: " + $0 } ?? "", privacy: .public)")
         let pause = settings.data.meetings.pauseMicShortcut ? " Press ⌃⌥M to pause your mic." : ""
         notifications.post("Mynah can't see Teams' mute button",
                            "Your mic is recorded even while you're muted in Teams.\(pause)", meetingID: r.meetingID)
