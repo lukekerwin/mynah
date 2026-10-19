@@ -1,5 +1,12 @@
 **Beta: not the stable release.** This build adds **speaker recognition** to meeting capture: Mynah tells apart the other people on a call and learns their voices, so after you name someone once, later meetings label them automatically. Voices and names stay on your Mac.
 
+### New in beta 8
+- **The sidebar opens pages from the start.** Clicking Meetings shows the list, not the last meeting you opened. Pages open at the top.
+- **The live transcript's Close button closes it** instead of popping right back open.
+- **Mynah asks before** deleting a meeting's audio, forgetting a person, or quitting while a call is being recorded.
+- **Due dates read naturally** ("Tomorrow", "Mon, Oct 20"), with overdue ones in coral.
+- **Esc** cancels the meeting setup and Edit to-do. **The window reopens where you left it.**
+
 ### New in beta 7
 - **Mynah's window keeps focus** when you close a popover or dialog (like New to-do), instead of dropping behind other apps.
 - **Fewer freezes:** the meeting page no longer reloads the whole meeting every second during a call, Mynah gives up quickly on a busy app (Teams mid-call) when you dictate, and quitting can't hang on the engine.
