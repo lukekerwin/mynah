@@ -267,7 +267,7 @@ private struct MenuMeetingSection: View {
         .padding(.vertical, 6)
     }
 
-    private var hasMeetings: Bool { (try? meetings.store.allMeetings().isEmpty) == false }
+    private var hasMeetings: Bool { (try? meetings.store.hasMeetings()) == true }
 
     private func recording(_ r: MeetingController.Recording) -> some View {
         VStack(alignment: .leading, spacing: 10) {

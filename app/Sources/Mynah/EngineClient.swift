@@ -323,18 +323,23 @@ final class EngineClient: ObservableObject {
             while !Task.isCancelled {
                 guard let self, gen == self.generation else { return }
                 if let health = try? await self.get("/health", as: EngineHealth.self) {
-                    self.health = health
+                    let status: Status
                     if let err = health.error {
-                        self.status = .failed(err)
+                        status = .failed(err)
                     } else if health.ready {
-                        self.status = .ready
+                        status = .ready
                     } else if let d = health.download {
-                        self.status = .downloading(label: d.label, done: d.done, total: d.total)
+                        status = .downloading(label: d.label, done: d.done, total: d.total)
                     } else {
-                        self.status = .loading
+                        status = .loading
                     }
+                    // Unchanged writes would still re-render every view observing the engine.
+                    if health != self.health { self.health = health }
+                    if status != self.status { self.status = status }
                 }
-                let interval: UInt64 = self.status == .ready ? 5 : 1
+                // Once ready this only watches for errors (a crash is caught by the
+                // termination handler), so poll gently to let the CPU stay idle.
+                let interval: UInt64 = self.status == .ready ? 15 : 1
                 try? await Task.sleep(nanoseconds: interval * 1_000_000_000)
             }
         }
