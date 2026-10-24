@@ -1,5 +1,8 @@
 **Beta: not the stable release.** This build adds **speaker recognition** to meeting capture: Mynah tells apart the other people on a call and learns their voices, so after you name someone once, later meetings label them automatically. Voices and names stay on your Mac.
 
+### New in beta 9
+- **Better battery life.** Mynah's windows no longer redraw every few seconds while you're not using them, and the menu no longer reloads every meeting each second during a call.
+
 ### New in beta 8
 - **The sidebar opens pages from the start.** Clicking Meetings shows the list, not the last meeting you opened. Pages open at the top.
 - **The live transcript's Close button closes it** instead of popping right back open.
