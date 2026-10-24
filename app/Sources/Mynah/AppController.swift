@@ -204,10 +204,15 @@ final class AppController: ObservableObject {
     }
 
     private func refreshPermissions() {
+        // Assign only on change: every @Published write re-renders all the views
+        // observing the controller, even hidden ones, and this runs every 2 s.
         let ax = Permissions.accessibilityGranted
-        if ax, !accessibilityOK { hotkey.start() }  // monitors only fire once trusted
-        accessibilityOK = ax
-        microphoneOK = Permissions.microphoneGranted
+        if ax != accessibilityOK {
+            if ax { hotkey.start() }  // monitors only fire once trusted
+            accessibilityOK = ax
+        }
+        let mic = Permissions.microphoneGranted
+        if mic != microphoneOK { microphoneOK = mic }
     }
 
     // MARK: hotkey handling
