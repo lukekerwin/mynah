@@ -139,6 +139,10 @@ public final class MeetingStore: Sendable {
         try db.read { try Meeting.order(Column("startedAt").desc).fetchAll($0) }
     }
 
+    public func hasMeetings() throws -> Bool {
+        try db.read { try Meeting.fetchCount($0) > 0 }
+    }
+
     /// Deletes the meeting with its segments, summary and action items.
     public func deleteMeeting(id: String) throws {
         _ = try db.write { try Meeting.deleteOne($0, key: id) }

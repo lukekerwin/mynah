@@ -436,7 +436,7 @@ final class MeetingController: ObservableObject {
         if session.takeYouPeak() > 0.05 { lastYouSound = Date() }  // above -26 dBFS: you're talking
         if peak > 0 {
             UserDefaults.standard.set(true, forKey: "MynahSystemAudioVerified")
-            permissionProblem = false
+            if permissionProblem { permissionProblem = false }
             return
         }
         guard !session.othersEverHeard, !permissionProblem else { return }
