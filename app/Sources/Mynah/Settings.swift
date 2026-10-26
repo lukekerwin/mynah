@@ -51,6 +51,7 @@ final class SettingsStore: ObservableObject {
         var hotkey: HotkeyChoice = .fn
         var playSounds = true
         var restoreClipboard = true
+        var pauseMedia = true
         /// Core Audio UID of the microphone. Starts as the built-in mic and only changes when
         /// the user picks another; empty only on Macs without one (uses the system default).
         var inputDevice = AudioDevices.builtInUID ?? ""
@@ -79,6 +80,7 @@ final class SettingsStore: ObservableObject {
             hotkey = (try? c.decodeIfPresent(HotkeyChoice.self, forKey: .hotkey)) ?? d.hotkey
             playSounds = try c.decodeIfPresent(Bool.self, forKey: .playSounds) ?? d.playSounds
             restoreClipboard = try c.decodeIfPresent(Bool.self, forKey: .restoreClipboard) ?? d.restoreClipboard
+            pauseMedia = try c.decodeIfPresent(Bool.self, forKey: .pauseMedia) ?? d.pauseMedia
             inputDevice = try c.decodeIfPresent(String.self, forKey: .inputDevice) ?? d.inputDevice
             onboarded = try c.decodeIfPresent(Bool.self, forKey: .onboarded) ?? d.onboarded
             meetings = (try? c.decodeIfPresent(MeetingSettings.self, forKey: .meetings)) ?? d.meetings
