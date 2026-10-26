@@ -1,5 +1,8 @@
 **Beta: not the stable release.** This build adds **speaker recognition** to meeting capture: Mynah tells apart the other people on a call and learns their voices, so after you name someone once, later meetings label them automatically. Voices and names stay on your Mac.
 
+### New in beta 10
+- **Music and videos pause while you dictate** and pick up where they left off when you stop (Spotify, Music, Podcasts, YouTube and other browser media, most video players). Only what Mynah paused is resumed. Turn it off in **Settings › Pause media while dictating**.
+
 ### New in beta 9
 - **Better battery life.** Mynah's windows no longer redraw every few seconds while you're not using them, and the menu no longer reloads every meeting each second during a call.
 
