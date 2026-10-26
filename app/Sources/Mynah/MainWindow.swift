@@ -769,6 +769,10 @@ private struct SettingsPage: View {
                         Toggle("", isOn: $settings.data.restoreClipboard).labelsHidden().toggleStyle(TealToggleStyle())
                     }
                     RowDivider()
+                    SettingRow(title: "Pause media while dictating", detail: "Music and videos pause while you talk and pick up where they left off when you stop.") {
+                        Toggle("", isOn: $settings.data.pauseMedia).labelsHidden().toggleStyle(TealToggleStyle())
+                    }
+                    RowDivider()
                     SettingRow(title: "Launch at login") {
                         Toggle("", isOn: $launchAtLogin).labelsHidden().toggleStyle(TealToggleStyle())
                             .onChange(of: launchAtLogin) { _, enabled in

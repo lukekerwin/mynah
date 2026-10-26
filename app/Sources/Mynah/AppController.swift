@@ -50,6 +50,7 @@ final class AppController: ObservableObject {
     @Published private(set) var microphoneOK = Permissions.microphoneGranted
 
     private let recorder = AudioRecorder()
+    private let media = MediaPauser()
     private let hotkey = HotkeyMonitor()
     private var pressedAt = Date()
     private var focus: FocusContext?
@@ -235,6 +236,7 @@ final class AppController: ObservableObject {
                 return
             }
             meetings?.setDictating(true)
+            if settings.data.pauseMedia { media.pause() }
             pressedAt = Date()
             phase = .recording(command: command, handsFree: false)
             overlay.show(.recording(command: command, handsFree: false))
@@ -261,6 +263,7 @@ final class AppController: ObservableObject {
         guard case .recording = phase else { return }
         _ = recorder.stop()
         meetings?.setDictating(false)
+        media.resume()
         phase = .idle
         overlay.hide()
         play("Bottle")
@@ -272,6 +275,7 @@ final class AppController: ObservableObject {
         guard case let .recording(command, _) = phase else { return }
         let samples = recorder.stop()
         meetings?.setDictating(false)
+        media.resume()
         play("Pop")
         let ctx = focus ?? FocusContext.capture()
         guard samples.count >= Self.minSamples else {
