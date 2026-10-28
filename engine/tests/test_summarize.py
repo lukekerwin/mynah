@@ -21,6 +21,20 @@ def test_format_transcript_merges_and_orders():
     assert "You (Luke):" in format_transcript(segs, "Luke")
 
 
+def test_format_transcript_uses_speaker_names():
+    segs = [
+        {"track": "others", "start": 1.0, "speaker": "Bob", "text": "Hi."},
+        {"track": "others", "start": 2.0, "speaker": "Bob", "text": "Ready?"},
+        {"track": "others", "start": 3.0, "speaker": "Speaker 2", "text": "Yes."},
+        {"track": "others", "start": 4.0, "text": "Unlabelled."},
+    ]
+    assert format_transcript(segs) == (
+        "[00:01] Bob: Hi. Ready?\n"
+        "[00:03] Speaker 2: Yes.\n"
+        "[00:04] Others: Unlabelled."
+    )
+
+
 def test_time_round_trip():
     assert fmt_time(754) == "12:34"
     assert parse_time("12:34") == 754

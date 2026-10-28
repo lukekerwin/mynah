@@ -17,6 +17,8 @@ public struct MeetingSettings: Codable, Equatable, Sendable {
     public var teamsMuteDetection = true
     /// Show the live transcript pill at the right edge of the screen while recording.
     public var liveTranscript = true
+    /// Split "Others" into individual voices after each call, and name the ones it knows.
+    public var recognizeSpeakers = true
 
     public init() {}
 
@@ -33,6 +35,7 @@ public struct MeetingSettings: Codable, Equatable, Sendable {
         pauseMicShortcut = try c.decodeIfPresent(Bool.self, forKey: .pauseMicShortcut) ?? d.pauseMicShortcut
         teamsMuteDetection = try c.decodeIfPresent(Bool.self, forKey: .teamsMuteDetection) ?? d.teamsMuteDetection
         liveTranscript = try c.decodeIfPresent(Bool.self, forKey: .liveTranscript) ?? d.liveTranscript
+        recognizeSpeakers = try c.decodeIfPresent(Bool.self, forKey: .recognizeSpeakers) ?? d.recognizeSpeakers
     }
 }
 

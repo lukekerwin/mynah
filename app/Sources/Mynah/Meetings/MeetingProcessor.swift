@@ -129,6 +129,7 @@ final class MeetingProcessor {
         do {
             let all = try store.segments(meetingID: meetingID)
             let echo = try hideEcho(meetingID: meetingID)
+            if settings.data.meetings.recognizeSpeakers { await identifySpeakers(meetingID: meetingID) }
             let hasSpeech = !(try store.segments(meetingID: meetingID)).isEmpty
             try store.modifyMeeting(id: meetingID) {
                 $0.hasSpeech = hasSpeech
@@ -151,6 +152,48 @@ final class MeetingProcessor {
                                       shortLines: micHearsCall(meetingID: meetingID))
         try store.hide(segmentIDs: echo, reason: "echo")
         return echo
+    }
+
+    /// Splits the "Others" track into voices, labels its segments, and names voices
+    /// that match people the user has named before. Needs the audio; a failure (say,
+    /// no network for the first model download) just leaves the transcript as "Others".
+    @discardableResult
+    func identifySpeakers(meetingID: String) async -> Bool {
+        let dir = Self.directory(meetingID)
+        let wav = Self.audioURL(dir, .others)
+        let url = FileManager.default.fileExists(atPath: wav.path) ? wav : wav.deletingPathExtension().appendingPathExtension("m4a")
+        guard FileManager.default.fileExists(atPath: url.path),
+              let segments = try? store.segments(meetingID: meetingID).filter({ $0.track == .others }), !segments.isEmpty
+        else { return false }
+        do {
+            let t0 = Date()
+            let result = try await SpeakerDiarizer.diarize(url: url)
+            let gallery = try store.voiceGallery(excluding: meetingID)
+            let matches = SpeakerMatching.match(
+                voices: result.voices.filter { $0.value.speechS >= SpeakerMatching.minSpeechS }.mapValues(\.voiceprint),
+                gallery: gallery)
+            let labels = SpeakerMatching.labels(for: segments.map { ($0.startS, $0.endS) }, turns: result.turns)
+            var segmentLabels: [Int64: String] = [:]
+            for (seg, label) in zip(segments, labels) {
+                if let id = seg.id, let label, result.voices[label] != nil { segmentLabels[id] = label }
+            }
+            // Only voices that actually say something in the transcript are worth listing.
+            let used = Set(segmentLabels.values)
+            let numbers = SpeakerMatching.numbers(result.turns.filter { used.contains($0.label) })
+            let speakers = result.voices.filter { used.contains($0.key) }.compactMap { label, voice -> MeetingSpeaker? in
+                guard let number = numbers[label] else { return nil }
+                let match = matches[label]
+                return MeetingSpeaker(meetingID: meetingID, label: label, number: number, speechS: voice.speechS,
+                                      embedding: Voiceprint.encode(voice.voiceprint), personID: match?.personID,
+                                      matchScore: match.map { Double($0.score) })
+            }
+            try store.saveSpeakers(meetingID: meetingID, speakers, segmentLabels: segmentLabels)
+            log.notice("speakers \(meetingID, privacy: .public): \(speakers.count) voices, \(matches.count) recognized, \(Date().timeIntervalSince(t0), format: .fixed(precision: 1)) s")
+            return true
+        } catch {
+            log.error("speakers \(meetingID, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     /// "Delete after transcript" removes the audio now; otherwise the WAVs are

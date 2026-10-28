@@ -8,5 +8,7 @@ __pycache__/
 # your voice recordings and benchmark outputs stay local
 bench/data/mine/
 bench/data/synthetic/
+bench/data/ami/
+bench/speakers/.build/
 bench/results/
 dist/

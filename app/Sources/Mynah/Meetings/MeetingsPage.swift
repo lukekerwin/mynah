@@ -401,6 +401,9 @@ final class MeetingDetailModel: ObservableObject {
         var lines: [TranscriptLine] = []
         var summary: MeetingSummary?
         var items: [ActionItem] = []
+        var speakers: [MeetingSpeaker] = []
+        var people: [Person] = []
+        var names: [String: String] = [:]
     }
 
     @Published private(set) var content = Content()
@@ -416,18 +419,22 @@ final class MeetingDetailModel: ObservableObject {
             .tracking { db -> Content in
                 let segs = try Segment.filter(Column("meetingID") == id && Column("hiddenReason") == nil)
                     .order(Column("startS"), Column("id")).fetchAll(db)
+                let speakers = try MeetingSpeaker.filter(Column("meetingID") == id).order(Column("number")).fetchAll(db)
+                let people = try Person.order(Column("name").collating(.localizedCaseInsensitiveCompare)).fetchAll(db)
+                let names = TranscriptFormatter.speakerNames(speakers, people: people)
                 return Content(meeting: try Meeting.fetchOne(db, key: id),
-                               lines: TranscriptFormatter.lines(segs),
+                               lines: TranscriptFormatter.lines(segs, names: names),
                                summary: try MeetingSummary.fetchOne(db, key: id),
                                items: try ActionItem.filter(Column("meetingID") == id && Column("deleted") == false)
-                                   .order(Column("status").desc, Column("timeS"), Column("id")).fetchAll(db))
+                                   .order(Column("status").desc, Column("timeS"), Column("id")).fetchAll(db),
+                               speakers: speakers, people: people, names: names)
             }
             .start(in: controller.store.db, scheduling: .immediate, onError: { _ in },
                    onChange: { [weak self] in self?.content = $0 })
     }
 
     var transcriptText: String {
-        content.lines.map { "[\(TranscriptFormatter.timestamp($0.startS))] \($0.track == .you ? "You" : "Others"): \($0.text)" }
+        content.lines.map { "[\(TranscriptFormatter.timestamp($0.startS))] \($0.who): \($0.text)" }
             .joined(separator: "\n")
     }
 }
@@ -470,6 +477,18 @@ struct MeetingDetailPage: View {
                 }
                 if let s = model.content.summary { summary(s) }
                 items(m)
+                if meetings.findingSpeakers.contains(m.id) {
+                    HStack(spacing: 12) {
+                        ProgressView().controlSize(.small)
+                        Text("Finding who spoke when…").font(Theme.body.weight(.semibold)).foregroundStyle(Theme.ink)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).fill(Theme.card))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border))
+                } else if !model.content.speakers.isEmpty {
+                    SpeakersCard(meeting: m, content: model.content, meetings: meetings)
+                }
                 transcript(m)
             } else {
                 Card { EmptyHint(symbol: "trash", text: "This meeting was deleted.") }
@@ -535,6 +554,9 @@ struct MeetingDetailPage: View {
                         }
                     }
                     Button("Copy transcript") { copy() }.disabled(model.content.lines.isEmpty)
+                    Button(model.content.speakers.isEmpty ? "Find speakers" : "Find speakers again") { meetings.findSpeakers(m.id) }
+                        .disabled(m.audioDeletedAt != nil || m.status == .recording || m.status == .transcribing
+                            || meetings.findingSpeakers.contains(m.id))
                     Divider()
                     Button("Show audio in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([MeetingProcessor.directory(m.id)])
@@ -661,7 +683,9 @@ struct MeetingDetailPage: View {
                     ScrollViewReader { proxy in
                         LazyVStack(alignment: .leading, spacing: 14) {
                             ForEach(visibleLines) { line in
-                                TranscriptLineRow(line: line, highlighted: isFocused(line)).id(line.id)
+                                TranscriptLineRow(line: line, highlighted: isFocused(line), meetingID: m.id,
+                                                  personID: model.content.speakers.first { $0.label == line.speakerLabel }?.personID,
+                                                  people: model.content.people, meetings: meetings).id(line.id)
                             }
                         }
                         .onAppear { scroll(proxy) }
@@ -752,15 +776,27 @@ private struct SpeakerFilter: View {
 private struct TranscriptLineRow: View {
     var line: TranscriptLine
     var highlighted: Bool
+    var meetingID: String
+    var personID: String?
+    var people: [Person]
+    let meetings: MeetingController
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .trailing, spacing: 4) {
-                SpeakerChip(track: line.track)
+                if let label = line.speakerLabel {
+                    SpeakerNameMenu(meetingID: meetingID, label: label, current: line.speakerName ?? "",
+                                    personID: personID, people: people, meetings: meetings) {
+                        SpeakerChip(track: line.track, name: line.speakerName)
+                    }
+                    .help("Who is this?")
+                } else {
+                    SpeakerChip(track: line.track, name: line.speakerName)
+                }
                 Text(TranscriptFormatter.timestamp(line.startS))
                     .font(.system(size: 10.5, weight: .medium).monospacedDigit()).foregroundStyle(Theme.inkTertiary)
             }
-            .frame(width: 58, alignment: .trailing)
+            .frame(width: 84, alignment: .trailing)
             Text(line.text).font(Theme.body).foregroundStyle(Theme.ink)
                 .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -768,6 +804,116 @@ private struct TranscriptLineRow: View {
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(highlighted ? Theme.tealSoft : .clear))
         .animation(.easeOut(duration: 0.3), value: highlighted)
+    }
+}
+
+// MARK: - Speakers
+
+/// The voices found in "Others", each with a menu to say who it is.
+private struct SpeakersCard: View {
+    var meeting: Meeting
+    var content: MeetingDetailModel.Content
+    @ObservedObject var meetings: MeetingController
+
+    var body: some View {
+        Card(title: "Speakers", subtitle: "Name a voice once and Mynah recognizes it in later calls.") {
+            VStack(spacing: 0) {
+                ForEach(Array(content.speakers.enumerated()), id: \.element.id) { index, s in
+                    if index > 0 { RowDivider() }
+                    row(s)
+                }
+                if notesOutdated {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.triangle.2.circlepath").foregroundStyle(Theme.teal)
+                        Text("Names changed after the notes were written.").font(Theme.caption).foregroundStyle(Theme.inkSecondary)
+                        Spacer()
+                        Button("Write notes again") { meetings.summaries.summarizeNow(meeting.id) }.buttonStyle(.quiet)
+                    }
+                    .padding(.top, 10)
+                }
+            }
+        }
+    }
+
+    private func row(_ s: MeetingSpeaker) -> some View {
+        let name = content.names[s.label] ?? s.placeholderName
+        let known = s.personID != nil
+        return HStack(spacing: 12) {
+            Text(known ? String(name.prefix(1)).uppercased() : "\(s.number)")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(known ? Theme.teal : Theme.inkSecondary)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(known ? Theme.tealSoft : Theme.well))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(Theme.body.weight(.semibold)).foregroundStyle(Theme.ink)
+                Text(detail(s)).font(Theme.caption).foregroundStyle(Theme.inkSecondary)
+            }
+            Spacer()
+            SpeakerNameMenu(meetingID: meeting.id, label: s.label, current: name, personID: s.personID,
+                            people: content.people, meetings: meetings) {
+                Text(known ? "Change" : "Name…").font(Theme.caption.weight(.semibold)).foregroundStyle(Theme.teal)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func detail(_ s: MeetingSpeaker) -> String {
+        let talk = s.speechS < 60 ? "\(Int(s.speechS)) s" : "\(Int((s.speechS / 60).rounded())) min"
+        let how: String
+        if s.personID != nil {
+            how = s.matchScore != nil ? "recognized by voice" : "named by you"
+        } else if s.speechS < SpeakerMatching.minSpeechS {
+            how = "too little speech to learn their voice"
+        } else {
+            how = s.namedAt != nil ? "unnamed" : "not recognized"
+        }
+        return "\(talk) of speech · \(how)"
+    }
+
+    private var notesOutdated: Bool {
+        guard let summary = content.summary, meeting.status == .done else { return false }
+        return content.speakers.contains { ($0.namedAt ?? .distantPast) > summary.createdAt }
+    }
+}
+
+/// "Who is Speaker 2?": pick someone already named, add a new person, or clear the name.
+struct SpeakerNameMenu<Label: View>: View {
+    var meetingID: String
+    var label: String
+    var current: String
+    var personID: String?
+    var people: [Person]
+    let meetings: MeetingController
+    @ViewBuilder var content: () -> Label
+    @State private var asking = false
+    @State private var newName = ""
+
+    var body: some View {
+        Menu {
+            ForEach(people) { p in
+                Button { meetings.nameSpeaker(meetingID: meetingID, label: label, personID: p.id) } label: {
+                    if p.id == personID { SwiftUI.Label(p.name, systemImage: "checkmark") } else { Text(p.name) }
+                }
+            }
+            if !people.isEmpty { Divider() }
+            Button("New person…") {
+                newName = ""
+                asking = true
+            }
+            if personID != nil {
+                Button("Clear name") { meetings.nameSpeaker(meetingID: meetingID, label: label, personID: nil) }
+            }
+        } label: {
+            content()
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .alert("Who is \(current)?", isPresented: $asking) {
+            TextField("Name", text: $newName)
+            Button("Save") { meetings.nameSpeaker(meetingID: meetingID, label: label, newName: newName) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Mynah will recognize their voice in later calls.")
+        }
     }
 }
 
