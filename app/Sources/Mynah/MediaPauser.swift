@@ -37,6 +37,12 @@ final class MediaPauser {
         _ = Self.send(.play)
     }
 
+    /// Ends the dictation's pause without resuming (the Mac is going to sleep).
+    func forget() {
+        generation += 1
+        pausedByUs = false
+    }
+
     // MARK: MediaRemote
 
     private enum Command: UInt32 {

@@ -105,6 +105,7 @@ final class AppController: ObservableObject {
         }
         Task { microphoneOK = await Permissions.requestMicrophone() }
         hotkey.start()
+        observeSleepAndLock()
         permissionTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshPermissions() }
         }
@@ -193,6 +194,46 @@ final class AppController: ObservableObject {
         engine.stop()
     }
 
+    /// Opening and closing the lid. Before this, a dictation left recording carried on
+    /// through sleep, a meeting recording got hours of silence appended on wake, and the
+    /// first dictation after a long sleep waited ~20 s for the models to page back in.
+    private func observeSleepAndLock() {
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.systemWillSleep() }
+        }
+        workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.systemDidWake() }
+        }
+        // Screen locked or another user switched in: stop listening (a hands-free
+        // dictation would otherwise record the room until you're back).
+        let locked: @Sendable (Notification) -> Void = { [weak self] _ in
+            MainActor.assumeIsolated { self?.cancel(quietly: true) }
+        }
+        let unlocked: @Sendable (Notification) -> Void = { [weak self] _ in
+            MainActor.assumeIsolated { self?.hotkey.start() }
+        }
+        workspace.addObserver(forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main, using: locked)
+        workspace.addObserver(forName: NSWorkspace.sessionDidBecomeActiveNotification, object: nil, queue: .main, using: unlocked)
+        let distributed = DistributedNotificationCenter.default()
+        distributed.addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main, using: locked)
+        distributed.addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main, using: unlocked)
+    }
+
+    private func systemWillSleep() {
+        cancel(quietly: true)
+        meetings?.systemWillSleep()
+    }
+
+    private func systemDidWake() {
+        // Re-arms the key monitors and forgets a key-down whose key-up was lost
+        // (otherwise the next press is ignored and its release ends a phantom dictation).
+        hotkey.start()
+        refreshPermissions()
+        meetings?.systemDidWake()
+        engine.systemDidWake()
+    }
+
     func startEngine() {
         engine.start(asr: settings.data.asrModel, llm: llmKey, commandLLM: commandKey)
     }
@@ -235,6 +276,7 @@ final class AppController: ObservableObject {
                 overlay.flash(error.localizedDescription)
                 return
             }
+            engine.warmUp()
             meetings?.setDictating(true)
             if settings.data.pauseMedia { media.pause() }
             pressedAt = Date()
@@ -259,14 +301,16 @@ final class AppController: ObservableObject {
         }
     }
 
-    private func cancel() {
+    /// Esc, or `quietly` when the Mac sleeps or locks: then media we paused stays
+    /// paused (resuming would start it playing as the lid closes) and no sound plays.
+    private func cancel(quietly: Bool = false) {
         guard case .recording = phase else { return }
         _ = recorder.stop()
         meetings?.setDictating(false)
-        media.resume()
+        if quietly { media.forget() } else { media.resume() }
         phase = .idle
         overlay.hide()
-        play("Bottle")
+        if !quietly { play("Bottle") }
     }
 
     // MARK: processing
