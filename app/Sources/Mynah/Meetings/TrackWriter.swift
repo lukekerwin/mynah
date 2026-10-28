@@ -217,8 +217,11 @@ final class MeetingMic {
         close()
     }
 
+    /// Also retries after a failed reopen (e.g. Core Audio still settling after wake),
+    /// which used to leave the "You" track silent for the rest of the meeting.
     private func devicesChanged() {
-        guard unit != nil, let wanted = AudioDevices.resolve(uid: deviceUID), wanted != device else { return }
+        guard devicesListener != nil, let wanted = AudioDevices.resolve(uid: deviceUID),
+              unit == nil || wanted != device else { return }
         let old = sampleRate
         close()
         try? open()

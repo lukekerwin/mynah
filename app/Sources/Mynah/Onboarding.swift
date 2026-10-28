@@ -25,6 +25,7 @@ final class OnboardingWindowController {
             self.window = window
         }
         NSApp.activate(ignoringOtherApps: true)
+        window?.moveOnscreenIfNeeded()
         window?.makeKeyAndOrderFront(nil)
     }
 
