@@ -176,6 +176,20 @@ final class MeetingController: ObservableObject {
         prepareEngine()
     }
 
+    /// No call survives sleep, so the recording ends now. Left running, its tracks were
+    /// padded on wake with silence for the whole time asleep. Detection stops too, so
+    /// it starts fresh on wake against whatever devices and processes Core Audio has then.
+    func systemWillSleep() {
+        if isRecording { stop(discard: false) }
+        notifications.remove(id: Self.askNotificationID)
+        if case .asking = state { state = .idle }
+        detector.stop()
+    }
+
+    func systemDidWake() {
+        apply()
+    }
+
     private func engineStatusChanged(_ status: EngineClient.Status) {
         if status != .ready { preparedGeneration = false }
         prepareEngine()
@@ -300,7 +314,10 @@ final class MeetingController: ObservableObject {
                 notifications.post("Couldn't start recording", error.localizedDescription)
                 return
             }
-            guard self.session === session else { return }  // stopped while starting
+            guard self.session === session else {  // stopped while starting
+                session.stop()  // otherwise the tap and mic it just opened stay running
+                return
+            }
             meeting.startedAt = session.startedAt
             try? store.update(meeting)
             session.setGate { $0.dictating = self.dictating }

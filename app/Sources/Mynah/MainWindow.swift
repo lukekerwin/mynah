@@ -72,7 +72,18 @@ final class MainWindowController {
         }
         NotificationCenter.default.post(name: .mynahShowPage, object: PageRequest(page: page, meeting: meeting))
         NSApp.activate(ignoringOtherApps: true)
+        window?.moveOnscreenIfNeeded()
         window?.makeKeyAndOrderFront(nil)
+    }
+}
+
+extension NSWindow {
+    /// A closed window keeps its frame, so one last shown on a display that's since been
+    /// unplugged (undocking, closing the lid) would reopen off every screen: the app
+    /// looks like it opened nothing.
+    func moveOnscreenIfNeeded() {
+        guard !NSScreen.screens.contains(where: { $0.visibleFrame.intersects(frame) }) else { return }
+        center()
     }
 }
 

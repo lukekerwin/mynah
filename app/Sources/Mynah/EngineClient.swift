@@ -136,6 +136,8 @@ final class EngineClient: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var generation = 0
     private var port = 0
+    /// Last dictation, command or warm-up: the models are warm for a while after.
+    private var lastUse = Date.distantPast
     private let token = UUID().uuidString
     private let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
@@ -305,16 +307,25 @@ final class EngineClient: ObservableObject {
     }
 
     /// An engine left over from a previous app instance would hold GPU memory.
-    /// (Engines also exit on their own once their parent app is gone.)
+    /// (Engines also exit on their own once their parent app is gone, so usually the
+    /// pid file is all that's left: after a force quit or crash nothing removes it, and
+    /// by the next launch its pid may belong to any other process.)
     private func killStaleEngine() {
         guard process == nil,
               let raw = try? String(contentsOf: Self.pidFile, encoding: .utf8),
               let pid = Int32(raw.trimmingCharacters(in: .whitespacesAndNewlines)) else { return }
         try? FileManager.default.removeItem(at: Self.pidFile)
-        guard kill(pid, SIGTERM) == 0 else { return }
+        guard Self.isEngine(pid), kill(pid, SIGTERM) == 0 else { return }
         for _ in 0..<30 where kill(pid, 0) == 0 {
             usleep(100_000)
         }
+    }
+
+    /// The process runs our private Python (env/bin/python resolves into `runtime`).
+    private static func isEngine(_ pid: pid_t) -> Bool {
+        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { return false }
+        return String(cString: path).hasPrefix(runtime.path + "/")
     }
 
     private func startPolling(gen: Int) {
@@ -345,7 +356,25 @@ final class EngineClient: ObservableObject {
         }
     }
 
+    /// Back from sleep: check on the engine now rather than at the next 15 s poll,
+    /// and page the models back in before the first dictation needs them.
+    func systemDidWake() {
+        guard process != nil else { return }
+        startPolling(gen: generation)
+        warmUp()
+    }
+
     // MARK: API
+
+    /// A tiny inference so the GPU is spun up and the weights are in memory when the
+    /// dictation arrives. Sent on hotkey press, so it runs while you talk: idle for a
+    /// few minutes, speech recognition took ~1 s instead of ~0.15 s, and the first
+    /// dictation after a night's sleep took over 20 s.
+    func warmUp() {
+        guard status == .ready, Date().timeIntervalSince(lastUse) > 15 else { return }
+        lastUse = Date()
+        Task { _ = try? await post("/warmup", body: [:], as: [String: Bool].self) }
+    }
 
     func configure(asr: String, llm: String?, commandLLM: String?) async {
         let body: [String: Any] = ["asr": asr, "llm": llm ?? NSNull(), "command_llm": commandLLM ?? NSNull()]
@@ -358,11 +387,13 @@ final class EngineClient: ObservableObject {
     }
 
     func dictate(samples: [Float], context: [String: Any]) async throws -> DictationResult {
-        try await post("/dictate", body: ["audio": Self.encode(samples), "context": context], as: DictationResult.self)
+        lastUse = Date()
+        return try await post("/dictate", body: ["audio": Self.encode(samples), "context": context], as: DictationResult.self)
     }
 
     func command(samples: [Float], selection: String, context: [String: Any]) async throws -> CommandResult {
-        try await post("/command", body: ["audio": Self.encode(samples), "selection": selection, "context": context],
+        lastUse = Date()
+        return try await post("/command", body: ["audio": Self.encode(samples), "selection": selection, "context": context],
                        as: CommandResult.self)
     }
 

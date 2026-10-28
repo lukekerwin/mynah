@@ -53,6 +53,15 @@ class Llm:
         mx.eval([c.state for c in cache])
         self._prefixes[kind] = (a[:n], cache)
 
+    def warm(self) -> None:
+        """One forward pass over a couple of tokens. It reads every layer's weights, so
+        weights paged out while the Mac slept or sat idle are back before a real request."""
+        import mlx.core as mx
+        from mlx_lm.models.cache import make_prompt_cache
+
+        cache = make_prompt_cache(self.model)
+        mx.eval(self.model(mx.array(self._encode("Hello"))[None], cache=cache))
+
     def _generate(self, prompt: str, max_tokens: int, kind: str) -> str:
         import mlx.core as mx
         from mlx_lm import stream_generate
