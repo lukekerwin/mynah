@@ -118,6 +118,7 @@ class Engine:
                 self.command_llm = Llm(command_llm)
             import mlx.core as mx
             mx.clear_cache()
+            wire_models()
         except Exception as e:  # surfaced via /health
             log.exception("model load failed")
             self.error = repr(e)
@@ -200,6 +201,27 @@ class Engine:
         return self.summarizer.summarize(body.get("segments", []), body.get("title") or "Call",
                                          body.get("my_name") or None, body.get("model") or None,
                                          float(body.get("duration_s") or 0), body.get("meeting_date") or None)
+
+
+WIRE_MIN_RAM = 24 * 2**30
+
+
+def wire_models() -> None:
+    """Keep the loaded weights wired between requests. mlx_lm only wires them during
+    generate() and the speech model never, so when other apps want memory macOS
+    drops their GPU residency and the next dictation spends 1-2 s re-mapping them.
+
+    Called after every (re)load, once the cache is cleared, so the limit tracks the
+    current models (plus headroom for KV caches) instead of whatever was loaded
+    before. Skipped below 24 GB, where pinning ~7 GB would push other apps to swap.
+    """
+    import mlx.core as mx
+
+    if os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") < WIRE_MIN_RAM:
+        return
+    limit = min(int(mx.get_active_memory() * 1.5), mx.device_info()["max_recommended_working_set_size"])
+    mx.set_wired_limit(limit)
+    log.info("wired limit %.1f GB", limit / 2**30)
 
 
 def describe_app(ctx: dict) -> str:
