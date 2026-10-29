@@ -350,8 +350,7 @@ final class AppController: ObservableObject {
             return
         }
         overlay.hide()
-        TextInserter.insert(Self.withLeadingSpace(result.text, after: ctx.precedingCharacter),
-                            restoreClipboard: settings.data.restoreClipboard)
+        await insert(Self.withLeadingSpace(result.text, after: ctx.precedingCharacter), into: ctx.bundleID)
         history.add(HistoryEntry(app: ctx.appName, kind: "dictation", raw: result.raw, text: result.text,
                                  asrMs: result.asr_ms, llmMs: result.llm_ms))
     }
@@ -365,14 +364,24 @@ final class AppController: ObservableObject {
             return
         }
         overlay.hide()
-        TextInserter.insert(result.text, restoreClipboard: settings.data.restoreClipboard)
+        await insert(result.text, into: ctx.bundleID)
         history.add(HistoryEntry(app: ctx.appName, kind: "command", raw: result.instruction, text: result.text,
                                  asrMs: result.asr_ms, llmMs: result.llm_ms))
     }
 
     func pasteLast() {
         guard let last = history.recent.first else { return }
-        TextInserter.insert(last.text, restoreClipboard: settings.data.restoreClipboard)
+        let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        Task { await insert(last.text, into: bundleID) }
+    }
+
+    /// Pastes, or types key by key into the apps listed under "Type instead of paste".
+    private func insert(_ text: String, into bundleID: String?) async {
+        if let bundleID, settings.data.typedApps.contains(where: { $0.bundleID == bundleID }) {
+            await TextInserter.type(text, into: bundleID)
+        } else {
+            TextInserter.insert(text, restoreClipboard: settings.data.restoreClipboard)
+        }
     }
 
     private func payload(_ ctx: FocusContext) -> [String: Any] {

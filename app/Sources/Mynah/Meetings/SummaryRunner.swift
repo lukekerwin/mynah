@@ -1,8 +1,7 @@
 import Foundation
 import MynahCore
-import os
 
-private let log = Logger(subsystem: "com.lukekerwin.mynah", category: "summary")
+private let log = AppLogger(category: "summary")
 
 /// Writes summaries + action items in the background, one meeting at a time, only
 /// while the Mac is idle and cool and no call is being recorded. A running job is

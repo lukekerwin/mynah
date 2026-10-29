@@ -797,6 +797,8 @@ private struct SettingsPage: View {
                 }
             }
 
+            TypedAppsCard(settings: settings)
+
             Card(title: "Microphone") {
                 VStack(spacing: 0) {
                     SettingRow(title: "Input", detail: micDetail) {
@@ -856,7 +858,7 @@ private struct SettingsPage: View {
                     permissionRow("Microphone", granted: controller.microphoneOK, detail: "To hear you.", pane: "Privacy_Microphone")
                     RowDivider()
                     permissionRow("Accessibility", granted: controller.accessibilityOK,
-                                  detail: "For the global hotkey, reading the focused app, and pasting text.",
+                                  detail: "For the global hotkey, reading the focused app, and pasting or typing text.",
                                   pane: "Privacy_Accessibility")
                 }
             }
@@ -908,6 +910,35 @@ private struct SettingsPage: View {
                 }
             }
         }
+    }
+}
+
+private struct TypedAppsCard: View {
+    @ObservedObject var settings: SettingsStore
+
+    var body: some View {
+        Card(title: "Type instead of paste",
+             subtitle: "For remote desktops and VMs that block the clipboard. Mynah types the text key by key, which is slower than pasting. Emoji and characters you can't type on your keyboard may not come through.") {
+            FlowLayout(spacing: 8) {
+                ForEach(settings.data.typedApps) { app in
+                    Chip(text: app.name) { settings.data.typedApps.removeAll { $0.bundleID == app.bundleID } }
+                }
+                Button("Add app…") { chooseApp() }.buttonStyle(.quiet)
+            }
+        }
+    }
+
+    private func chooseApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.prompt = "Add"
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url, let bundle = Bundle(url: url),
+              let bundleID = bundle.bundleIdentifier,
+              !settings.data.typedApps.contains(where: { $0.bundleID == bundleID }) else { return }
+        let name = FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+        settings.data.typedApps.append(TypedApp(bundleID: bundleID, name: name))
     }
 }
 

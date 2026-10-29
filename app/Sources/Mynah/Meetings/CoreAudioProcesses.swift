@@ -2,6 +2,8 @@ import AppKit
 import CoreAudio
 import Foundation
 
+private let log = AppLogger(category: "audio")
+
 /// A process that has an audio connection, as Core Audio reports it.
 struct AudioProcess: Equatable {
     let objectID: AudioObjectID
@@ -84,6 +86,10 @@ enum CoreAudioProcesses {
 /// don't fire, so this listens to the process list, each process's IsRunning,
 /// the default input's IsRunningSomewhere and default-device changes; callers
 /// re-read `CoreAudioProcesses.snapshot()`.
+///
+/// When processes come and go, only their listeners are added or removed, at most
+/// once per coalescing window: re-registering every listener on each notification
+/// pinned the main thread inside Core Audio and froze Mynah.
 final class AudioActivityMonitor {
     var onChange: (() -> Void)?
 
@@ -93,52 +99,87 @@ final class AudioActivityMonitor {
         let block: AudioObjectPropertyListenerBlock
     }
 
-    private var registrations: [Registration] = []
+    private var systemRegistrations: [Registration] = []
+    private var processRegistrations: [AudioObjectID: [Registration]] = [:]
+    private var inputRegistration: Registration?
+    private var inputDevice: AudioObjectID?
     private var pending = false
+    private var needsSync = false
     private let queue = DispatchQueue.main
 
     func start() {
         stop()
-        listen(CoreAudioProcesses.system, kAudioHardwarePropertyProcessObjectList, rebuild: true)
-        listen(CoreAudioProcesses.system, kAudioHardwarePropertyDefaultInputDevice, rebuild: true)
-        listen(CoreAudioProcesses.system, kAudioHardwarePropertyDefaultOutputDevice, rebuild: false)
-        if let input = CoreAudioProcesses.defaultDevice(output: false) {
-            listen(input, kAudioDevicePropertyDeviceIsRunningSomewhere, rebuild: false)
+        for (selector, sync) in [(kAudioHardwarePropertyProcessObjectList, true),
+                                 (kAudioHardwarePropertyDefaultInputDevice, true),
+                                 (kAudioHardwarePropertyDefaultOutputDevice, false)] {
+            if let r = listen(CoreAudioProcesses.system, selector, sync: sync) { systemRegistrations.append(r) }
         }
-        for process in CoreAudioProcesses.objectList(CoreAudioProcesses.system, kAudioHardwarePropertyProcessObjectList) {
-            listen(process, kAudioProcessPropertyIsRunning, rebuild: false)
-            listen(process, kAudioProcessPropertyIsRunningInput, rebuild: false)
-            listen(process, kAudioProcessPropertyIsRunningOutput, rebuild: false)
-        }
+        sync()
     }
 
     func stop() {
-        for var r in registrations {
-            AudioObjectRemovePropertyListenerBlock(r.object, &r.address, queue, r.block)
-        }
-        registrations.removeAll()
+        let all = systemRegistrations + processRegistrations.values.flatMap { $0 } + [inputRegistration].compactMap { $0 }
+        all.forEach(remove)
+        systemRegistrations.removeAll()
+        processRegistrations.removeAll()
+        inputRegistration = nil
+        inputDevice = nil
+        pending = false
+        needsSync = false
     }
 
     deinit { stop() }
 
-    private func listen(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, rebuild: Bool) {
+    /// Brings the per-process and default-input listeners in line with what exists now.
+    private func sync() {
+        let initial = processRegistrations.isEmpty
+        let current = Set(CoreAudioProcesses.objectList(CoreAudioProcesses.system, kAudioHardwarePropertyProcessObjectList))
+        let gone = processRegistrations.keys.filter { !current.contains($0) }
+        for id in gone { processRegistrations.removeValue(forKey: id)?.forEach(remove) }
+        let added = current.filter { processRegistrations[$0] == nil }
+        for id in added {
+            processRegistrations[id] = [kAudioProcessPropertyIsRunning, kAudioProcessPropertyIsRunningInput,
+                                        kAudioProcessPropertyIsRunningOutput].compactMap { listen(id, $0, sync: false) }
+        }
+
+        let input = CoreAudioProcesses.defaultDevice(output: false)
+        if input != inputDevice {
+            inputRegistration.map(remove)
+            inputRegistration = input.flatMap { listen($0, kAudioDevicePropertyDeviceIsRunningSomewhere, sync: false) }
+            inputDevice = input
+        }
+        if !initial, !gone.isEmpty || !added.isEmpty {
+            log.info("audio processes +\(added.count) -\(gone.count), watching \(processRegistrations.count)")
+        }
+    }
+
+    private func listen(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, sync: Bool) -> Registration? {
         var addr = CoreAudioProcesses.address(selector)
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             guard let self else { return }
-            if rebuild { self.start() }  // new processes/devices need their own listeners
+            if sync { self.needsSync = true }  // new processes/devices need their own listeners
             self.changed()
         }
-        if AudioObjectAddPropertyListenerBlock(object, &addr, queue, block) == noErr {
-            registrations.append(Registration(object: object, address: addr, block: block))
-        }
+        guard AudioObjectAddPropertyListenerBlock(object, &addr, queue, block) == noErr else { return nil }
+        return Registration(object: object, address: addr, block: block)
+    }
+
+    private func remove(_ registration: Registration) {
+        var r = registration
+        AudioObjectRemovePropertyListenerBlock(r.object, &r.address, queue, r.block)
     }
 
     private func changed() {
         guard !pending else { return }
         pending = true
         queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            self?.pending = false
-            self?.onChange?()
+            guard let self, self.pending else { return }
+            self.pending = false
+            if self.needsSync {
+                self.needsSync = false
+                self.sync()
+            }
+            self.onChange?()
         }
     }
 }

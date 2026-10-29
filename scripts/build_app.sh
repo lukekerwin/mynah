@@ -95,7 +95,16 @@ echo "Built $OUT ($(du -sh "$OUT" | cut -f1))"
 if [[ "${1:-}" == "--install" ]]; then
     echo "==> Installing to /Applications"
     pkill -x "$APP_NAME" 2>/dev/null && sleep 1 || true
-    rm -rf "/Applications/$APP_NAME.app"
-    ditto "$OUT" "/Applications/$APP_NAME.app"
-    open "/Applications/$APP_NAME.app"
+    DEST="/Applications/$APP_NAME.app"
+    if [[ -w /Applications ]]; then
+        rm -rf "$DEST"
+    elif [[ -O "$DEST" ]]; then
+        # Not an admin: /Applications is read-only, but the bundle we own can be refilled.
+        rm -rf "$DEST/Contents"
+    else
+        echo "error: can't write to /Applications; drag $OUT there in Finder" >&2
+        exit 1
+    fi
+    ditto "$OUT" "$DEST"
+    open "$DEST"
 fi

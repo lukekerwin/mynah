@@ -1,9 +1,8 @@
 import CoreAudio
 import Foundation
 import MynahCore
-import os
 
-private let log = Logger(subsystem: "com.lukekerwin.mynah", category: "tap")
+private let log = AppLogger(category: "tap")
 
 enum TapError: LocalizedError {
     case coreAudio(String, OSStatus)
