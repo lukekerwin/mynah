@@ -1,9 +1,8 @@
 import AVFoundation
 import Foundation
 import MynahCore
-import os
 
-private let log = Logger(subsystem: "com.lukekerwin.mynah", category: "meeting")
+private let log = AppLogger(category: "meeting")
 
 /// Turns a meeting's WAV tracks into stored transcript segments (in bursts during
 /// the call, then to the end once it's over), hides echo, and applies the audio

@@ -62,6 +62,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller = AppController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppLog.write("app", "notice", "Mynah \(Updater.currentVersion) launched")
+        MainThreadWatchdog.shared.start()
         controller.launch()
     }
 

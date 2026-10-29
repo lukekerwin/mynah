@@ -2,9 +2,8 @@ import AppKit
 import Combine
 import CoreAudio
 import MynahCore
-import os
 
-private let log = Logger(subsystem: "com.lukekerwin.mynah", category: "meeting")
+private let log = AppLogger(category: "meeting")
 
 /// An app whose audio can be recorded manually ("Record Meeting ›").
 struct AudioApp: Identifiable, Hashable {
