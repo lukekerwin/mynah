@@ -139,3 +139,11 @@ struct SemanticVersionTests {
         #expect(SemanticVersion.compare("0.2.0-beta.1", "0.2.0-beta.1") == .orderedSame)
     }
 }
+
+struct PlainTextTests {
+    @Test func swapsTypographicPunctuation() {
+        #expect(PlainText.keyboardFriendly("“It’s fine” — really… ok") == "\"It's fine\" - really... ok")
+        #expect(PlainText.keyboardFriendly("a\r\nb\u{00A0}c") == "a\nb c")
+        #expect(PlainText.keyboardFriendly("café, naïve") == "café, naïve")
+    }
+}

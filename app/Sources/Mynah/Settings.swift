@@ -3,6 +3,17 @@ import Combine
 import Foundation
 import MynahCore
 
+/// An app that gets text typed key by key instead of pasted, for remote desktops
+/// and VMs whose clipboard is blocked.
+struct TypedApp: Codable, Identifiable, Hashable {
+    var bundleID: String
+    var name: String
+
+    var id: String { bundleID }
+
+    static let defaults = [TypedApp(bundleID: "com.microsoft.rdc.macos", name: "Windows App")]
+}
+
 struct Snippet: Codable, Identifiable, Hashable {
     var id = UUID()
     var trigger: String
@@ -51,6 +62,7 @@ final class SettingsStore: ObservableObject {
         var hotkey: HotkeyChoice = .fn
         var playSounds = true
         var restoreClipboard = true
+        var typedApps = TypedApp.defaults
         var pauseMedia = true
         /// Core Audio UID of the microphone. Starts as the built-in mic and only changes when
         /// the user picks another; empty only on Macs without one (uses the system default).
@@ -80,6 +92,7 @@ final class SettingsStore: ObservableObject {
             hotkey = (try? c.decodeIfPresent(HotkeyChoice.self, forKey: .hotkey)) ?? d.hotkey
             playSounds = try c.decodeIfPresent(Bool.self, forKey: .playSounds) ?? d.playSounds
             restoreClipboard = try c.decodeIfPresent(Bool.self, forKey: .restoreClipboard) ?? d.restoreClipboard
+            typedApps = (try? c.decodeIfPresent([TypedApp].self, forKey: .typedApps)) ?? d.typedApps
             pauseMedia = try c.decodeIfPresent(Bool.self, forKey: .pauseMedia) ?? d.pauseMedia
             inputDevice = try c.decodeIfPresent(String.self, forKey: .inputDevice) ?? d.inputDevice
             onboarded = try c.decodeIfPresent(Bool.self, forKey: .onboarded) ?? d.onboarded
