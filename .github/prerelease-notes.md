@@ -1,5 +1,8 @@
 **Beta: not the stable release.** This build makes dictation work in **remote desktops and VMs that block copy and paste**, and fixes a freeze.
 
+### New in beta 2
+- **Fixed freezes when you start dictating** with sound going to a monitor's speakers (or another output that's slow to start). Mynah waited for the start sound to play before it could open the microphone, which could take 10–20 seconds. Sounds now play in the background, and on an output that's slow to start, Mynah stops playing them until it's relaunched.
+
 ### New in beta 1
 - **Type instead of paste.** In apps where the clipboard doesn't reach (Windows App, out of the box), Mynah types what you dictated key by key instead of pasting it. Add other remote desktop or VM apps in **Settings › Type instead of paste › Add app…**, or remove one by clicking its ✕.
 - **Fixed a freeze** where Mynah stopped responding (often noticed only at the next dictation) while it re-registered for audio changes from every app on the Mac, over and over.
