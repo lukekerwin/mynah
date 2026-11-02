@@ -402,8 +402,7 @@ final class AppController: ObservableObject {
     }
 
     private func play(_ name: String) {
-        guard settings.data.playSounds, let sound = NSSound(named: NSSound.Name(name)) else { return }
-        sound.volume = 0.25
-        sound.play()
+        guard settings.data.playSounds else { return }
+        Chime.play(name)
     }
 }
