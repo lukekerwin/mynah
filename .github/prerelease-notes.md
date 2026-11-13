@@ -1,5 +1,9 @@
 **Beta: not the stable release.** This build makes dictation work in **remote desktops and VMs that block copy and paste**, and fixes a freeze.
 
+### New in beta 3
+- **Dictation no longer hangs on "processing" for up to a minute** during or right after a call. If cleaning up your words takes more than 5 seconds, Mynah inserts what you said with basic capitalization and punctuation instead of waiting.
+- **Slow dictations are now logged** with timing and memory details in `engine.log` and `app.log`. If it happens to you, send those along.
+
 ### New in beta 2
 - **Fixed freezes when you start dictating** with sound going to a monitor's speakers (or another output that's slow to start). Mynah waited for the start sound to play before it could open the microphone, which could take 10–20 seconds. Sounds now play in the background, and on an output that's slow to start, Mynah stops playing them until it's relaunched.
 
@@ -9,6 +13,7 @@
 - **Mynah keeps its own log** at `~/Library/Logs/Mynah/app.log`, next to `engine.log`. If Mynah stops responding for more than 5 seconds, it notes it there and saves a `hang-*.txt` snapshot next to it. Send those along when reporting a freeze; no admin account needed.
 
 ### What to try
+- Dictate right after a call ends, while its notes are being written.
 - Dictate into a Windows session in Windows App, including punctuation like `?`, `!`, `:` and quotes.
 - Switch to another app while a long dictation is being typed: typing stops.
 
