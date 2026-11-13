@@ -102,6 +102,11 @@ enum TextInserter {
     private static let leftShift = CGEventFlags(rawValue: CGEventFlags.maskShift.rawValue
         | UInt64(NX_DEVICELSHIFTKEYMASK) | UInt64(NX_NONCOALSESCEDMASK))
 
+    /// Shift held around a shifted key, as a person types it. With Shift only 2 ms ahead
+    /// and the key released instantly, a VM dropped the shifted letter altogether.
+    private static let shiftLead: UInt64 = 20_000_000
+    private static let keyHold: UInt64 = 5_000_000
+
     /// Holds Shift as a real key press rather than only a flag: remote clients track
     /// modifier keys themselves. The key events also carry `ch` as their text, for
     /// clients that read that instead.
@@ -110,12 +115,13 @@ enum TextInserter {
         let text = ch == "\n" || ch == "\t" ? nil : ch
         if stroke.shift {
             post(CGKeyCode(kVK_Shift), down: true, flags: flags, source)
-            try? await Task.sleep(nanoseconds: 2_000_000)
+            try? await Task.sleep(nanoseconds: shiftLead)
         }
         post(stroke.key, down: true, flags: flags, text: text, source)
+        if stroke.shift { try? await Task.sleep(nanoseconds: keyHold) }
         post(stroke.key, down: false, flags: flags, text: text, source)
         if stroke.shift {
-            try? await Task.sleep(nanoseconds: 2_000_000)
+            try? await Task.sleep(nanoseconds: shiftLead)
             post(CGKeyCode(kVK_Shift), down: false, flags: [], source)
         }
     }
@@ -123,6 +129,8 @@ enum TextInserter {
     private static func post(_ key: CGKeyCode, down: Bool, flags: CGEventFlags, text: Character? = nil,
                              _ source: CGEventSource?) {
         let event = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down)
+        // A physical Shift sends "flags changed", not key down/up.
+        if key == CGKeyCode(kVK_Shift) { event?.type = .flagsChanged }
         event?.flags = flags
         if let text {
             let units = Array(String(text).utf16)

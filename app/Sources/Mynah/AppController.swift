@@ -56,6 +56,9 @@ final class AppController: ObservableObject {
     private let hotkey = HotkeyMonitor()
     private var pressedAt = Date()
     private var focus: FocusContext?
+    /// The last character typed into an app where Accessibility can't see the text (a
+    /// remote session), to space the next dictation after it.
+    private var lastTyped: (bundleID: String, character: Character, at: Date)?
     private var subscriptions = Set<AnyCancellable>()
     private var permissionTimer: Timer?
 
@@ -358,7 +361,8 @@ final class AppController: ObservableObject {
             return
         }
         overlay.hide()
-        await insert(Self.withLeadingSpace(result.text, after: ctx.precedingCharacter), into: ctx.bundleID)
+        await insert(Self.withLeadingSpace(result.text, after: ctx.precedingCharacter ?? typedBefore(ctx.bundleID)),
+                     into: ctx.bundleID)
         history.add(HistoryEntry(app: ctx.appName, kind: "dictation", raw: result.raw, text: result.text,
                                  asrMs: result.asr_ms, llmMs: result.llm_ms))
     }
@@ -387,6 +391,7 @@ final class AppController: ObservableObject {
     private func insert(_ text: String, into bundleID: String?) async {
         if let bundleID, settings.data.typedApps.contains(where: { $0.bundleID == bundleID }) {
             await TextInserter.type(text, into: bundleID)
+            lastTyped = text.last.map { (bundleID, $0, Date()) }
         } else {
             TextInserter.insert(text, restoreClipboard: settings.data.restoreClipboard)
         }
@@ -403,6 +408,13 @@ final class AppController: ObservableObject {
     }
 
     /// Dictating right after a word shouldn't glue the new text onto it.
+    /// What we last typed into this app, if recent: what's before the cursor is
+    /// probably still that.
+    private func typedBefore(_ bundleID: String?) -> Character? {
+        guard let lastTyped, lastTyped.bundleID == bundleID, Date().timeIntervalSince(lastTyped.at) < 300 else { return nil }
+        return lastTyped.character
+    }
+
     static func withLeadingSpace(_ text: String, after previous: Character?) -> String {
         guard let previous, !previous.isWhitespace, !"([{\"'“‘/".contains(previous),
               let first = text.first, !".,;:!?)]}".contains(first) else { return text }
