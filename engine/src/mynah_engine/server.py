@@ -134,7 +134,7 @@ class Engine:
                 "command_llm": self.command_llm.spec.key if self.command_llm else None}
 
     # -- inference (always on the worker thread, via Engine.run) -------------
-    def warm(self) -> None:
+    def warm(self, queued_at: float | None = None) -> None:
         """A tiny pass through each loaded model, run while the user is still talking.
         After a long idle or a night's sleep the weights are paged out, and the first
         dictation paid for reading them back in: up to ~20 s instead of ~1 s."""
@@ -143,7 +143,7 @@ class Engine:
             self.asr.transcribe(np.zeros(SAMPLE_RATE, dtype=np.float32))
         for llm in {id(m): m for m in (self.llm, self.command_llm) if m}.values():
             llm.warm()
-        log.info("warm-up %.0fms", (time.perf_counter() - t0) * 1000)
+        log.info("warm-up %.0fms%s", (time.perf_counter() - t0) * 1000, waited(queued_at, t0))
 
     def _transcribe(self, audio: np.ndarray, vocab: list[str]) -> tuple[str, float]:
         if not self.asr:
@@ -154,7 +154,8 @@ class Engine:
         raw = self.asr.transcribe(audio, vocab)
         return raw, (time.perf_counter() - t0) * 1000
 
-    def dictate(self, audio: np.ndarray, ctx: dict) -> dict:
+    def dictate(self, audio: np.ndarray, ctx: dict, queued_at: float | None = None) -> dict:
+        wait = waited(queued_at)
         vocab = [v for v in ctx.get("vocab", []) if v.strip()]
         app = describe_app(ctx)
         raw, asr_ms = self._transcribe(audio, vocab)
@@ -171,10 +172,11 @@ class Engine:
         else:
             text = basic_cleanup(fixed)
         text = apply_snippets(apply_vocab(text, vocab), ctx.get("snippets", []))
-        log.info("dictate app=%s asr=%.0fms llm=%.0fms raw=%r -> %r", app, asr_ms, llm_ms, raw, text)
+        log.info("dictate app=%s%s asr=%.0fms llm=%.0fms raw=%r -> %r", app, wait, asr_ms, llm_ms, raw, text)
         return {"raw": raw, "text": text, "asr_ms": round(asr_ms), "llm_ms": round(llm_ms)}
 
-    def command(self, audio: np.ndarray, selection: str, ctx: dict) -> dict:
+    def command(self, audio: np.ndarray, selection: str, ctx: dict, queued_at: float | None = None) -> dict:
+        wait = waited(queued_at)
         if not self.command_llm:
             raise RuntimeError("command mode needs a general-purpose LLM; pick one in Settings")
         vocab = [v for v in ctx.get("vocab", []) if v.strip()]
@@ -185,7 +187,7 @@ class Engine:
         t0 = time.perf_counter()
         text = self.command_llm.command(instruction, selection, app)
         llm_ms = (time.perf_counter() - t0) * 1000
-        log.info("command app=%s instruction=%r -> %d chars", app, instruction, len(text))
+        log.info("command app=%s%s instruction=%r -> %d chars", app, wait, instruction, len(text))
         return {"instruction": instruction, "text": text, "asr_ms": round(asr_ms), "llm_ms": round(llm_ms)}
 
     def transcribe_window(self, audio: np.ndarray, offset_s: float, vocab: list[str], final: bool) -> dict:
@@ -222,6 +224,14 @@ def wire_models() -> None:
     limit = min(int(mx.get_active_memory() * 1.5), mx.device_info()["max_recommended_working_set_size"])
     mx.set_wired_limit(limit)
     log.info("wired limit %.1f GB", limit / 2**30)
+
+
+def waited(queued_at: float | None, now: float | None = None) -> str:
+    """' wait=…ms' when a job sat in the worker queue for a noticeable time, else ''."""
+    if queued_at is None:
+        return ""
+    ms = ((now or time.perf_counter()) - queued_at) * 1000
+    return f" wait={ms:.0f}ms" if ms >= 50 else ""
 
 
 def describe_app(ctx: dict) -> str:
@@ -302,12 +312,13 @@ def make_handler(engine: Engine, token: str):
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
                 if self.path == "/dictate":
                     self._send(200, engine.run(engine.dictate, decode_audio(body["audio"]),
-                                               body.get("context", {}), inline_ok=True))
+                                               body.get("context", {}), time.perf_counter(), inline_ok=True))
                 elif self.path == "/command":
                     self._send(200, engine.run(engine.command, decode_audio(body["audio"]),
-                                               body.get("selection", ""), body.get("context", {}), inline_ok=True))
+                                               body.get("selection", ""), body.get("context", {}),
+                                               time.perf_counter(), inline_ok=True))
                 elif self.path == "/warmup":
-                    engine.run(engine.warm, inline_ok=True)
+                    engine.run(engine.warm, time.perf_counter(), inline_ok=True)
                     self._send(200, {"ok": True})
                 elif self.path == "/transcribe":
                     self._send(200, engine.run(engine.transcribe_window, decode_audio(body["audio"]),
