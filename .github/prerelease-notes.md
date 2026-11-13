@@ -1,5 +1,9 @@
 **Beta: not the stable release.** This build makes dictation work in **remote desktops and VMs that block copy and paste**, and fixes a freeze.
 
+### New in beta 4
+- **Dictations typed into a remote session are spaced after the previous one**, instead of running into it. Mynah can't see the text inside a remote desktop, so it goes by what it last typed there in the past 5 minutes.
+- **Capitals and other Shift characters are typed more like a real keyboard**, for VMs that dropped them.
+
 ### New in beta 3
 - **Dictation no longer hangs on "processing" for up to a minute** during or right after a call. If cleaning up your words takes more than 5 seconds, Mynah inserts what you said with basic capitalization and punctuation instead of waiting.
 - **Slow dictations are now logged** with timing and memory details in `engine.log` and `app.log`. If it happens to you, send those along.
@@ -21,6 +25,7 @@
 - Typing is slower than pasting: a long dictation takes a few seconds to appear.
 - Emoji and characters that need Option or a dead key (é, ü, …) may not come through in a remote session.
 - Command mode can't read the selected text inside a VM that blocks the clipboard.
+- In remote desktops and VMs, use **Fn / Globe** as the hotkey. Right Option reaches Windows as Alt, which selects the menu bar and swallows the first letter; right Command reaches it as the Windows key.
 - Updating a beta resets macOS permissions, because builds are ad-hoc signed.
 
 ### Install
