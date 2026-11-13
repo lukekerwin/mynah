@@ -3,6 +3,8 @@ import Combine
 import MynahCore
 import SwiftUI
 
+private let log = AppLogger(category: "dictation")
+
 /// Ties hotkey → recorder → engine → paste together.
 ///
 /// Interaction model (mirrors Wispr Flow):
@@ -329,8 +331,14 @@ final class AppController: ObservableObject {
         }
         phase = .processing
         overlay.show(.processing(command: command))
+        let releasedAt = Date()
         Task {
-            defer { phase = .idle }
+            defer {
+                phase = .idle
+                // Whether the time went to the engine (engine.log) or to us.
+                let took = Date().timeIntervalSince(releasedAt)
+                if took > 3 { log.notice("\(command ? "command" : "dictation") took \(took, format: .fixed(precision: 1)) s") }
+            }
             do {
                 if command {
                     try await runCommand(samples, ctx)
